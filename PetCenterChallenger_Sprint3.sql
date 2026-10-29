@@ -669,6 +669,61 @@ EXCEPTION
 
 END;
 
+-- (feedback Sprint 3) procedure: pr_insert_alertas
+-- Tabela ALERTAS existia sem procedure de carga parametrizada.
+
+CREATE OR REPLACE PROCEDURE pr_insert_alertas (
+    p_pet_id            IN NUMBER,
+    p_veterinario_id    IN NUMBER,
+    p_tipo              IN VARCHAR2,
+    p_titulo            IN VARCHAR2,
+    p_descricao         IN VARCHAR2,
+    p_data_inicio       IN TIMESTAMP,
+    p_frequencia_horas  IN NUMBER,
+    p_data_fim          IN TIMESTAMP,
+    p_ativo             IN NUMBER
+)
+IS
+BEGIN
+
+    INSERT INTO alertas (
+        pet_id,
+        veterinario_id,
+        tipo,
+        titulo,
+        descricao,
+        data_inicio,
+        frequencia_horas,
+        data_fim,
+        ativo
+    )
+    VALUES (
+        p_pet_id,
+        p_veterinario_id,
+        p_tipo,
+        p_titulo,
+        p_descricao,
+        p_data_inicio,
+        p_frequencia_horas,
+        p_data_fim,
+        p_ativo
+    );
+
+    COMMIT;
+
+EXCEPTION
+
+    WHEN VALUE_ERROR THEN
+        pr_log_erro('pr_insert_alertas', SQLCODE, SQLERRM);
+
+    WHEN NO_DATA_FOUND THEN
+        pr_log_erro('pr_insert_alertas', SQLCODE, SQLERRM);
+
+    WHEN OTHERS THEN
+        pr_log_erro('pr_insert_alertas', SQLCODE, SQLERRM);
+
+END;
+
 -- inserindo valores
 
 -- USERS
@@ -970,6 +1025,332 @@ BEGIN
 
 END;
 
+
+-- (feedback Sprint 3) carga complementar
+-- Garantir pelo menos 5 registros em cada tabela de negócio.
+
+-- (feedback Sprint 3) carga complementar: users
+-- 4 originais + 4 novos = 8
+BEGIN
+
+    pr_insert_users(
+        'Beatriz Rocha',
+        'beatriz@email.com',
+        '123',
+        '11999990005',
+        'TUTOR'
+    );
+
+    pr_insert_users(
+        'Dr. Ricardo Mendes',
+        'ricardo@email.com',
+        '123',
+        '11999990006',
+        'VETERINARIO'
+    );
+
+    pr_insert_users(
+        'Dra. Paula Nunes',
+        'paula@email.com',
+        '123',
+        '11999990007',
+        'VETERINARIO'
+    );
+
+    pr_insert_users(
+        'Dr. Bruno Teixeira',
+        'bruno@email.com',
+        '123',
+        '11999990008',
+        'VETERINARIO'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: veterinarios
+-- 2 originais + 3 novos = 5
+-- user_id 6, 7 e 8 = novos usuários do tipo VETERINARIO
+BEGIN
+
+    pr_insert_veterinarios(
+        6,
+        'CRMV-SP-1003',
+        'Cardiologia',
+        'Acompanhamento de cardiopatias em cães'
+    );
+
+    pr_insert_veterinarios(
+        7,
+        'CRMV-SP-1004',
+        'Nutrição',
+        'Planos alimentares para pets idosos'
+    );
+
+    pr_insert_veterinarios(
+        8,
+        'CRMV-SP-1005',
+        'Ortopedia',
+        'Reabilitação e lesões articulares'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: pets
+-- 3 originais + 2 novos = 5
+BEGIN
+
+    pr_insert_pets(
+        2,
+        'Rex',
+        'Cachorro',
+        'Pastor Alemão',
+        TO_DATE('2018-11-02','YYYY-MM-DD'),
+        'Muito protetor'
+    );
+
+    pr_insert_pets(
+        5,
+        'Mel',
+        'Gato',
+        'Persa',
+        TO_DATE('2022-01-18','YYYY-MM-DD'),
+        'Pelagem longa, requer escovação'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: pet_veterinario
+-- 3 originais + 2 novos = 5
+BEGIN
+
+    pr_insert_pet_veterinario(
+        4,
+        2,
+        SYSDATE,
+        1,
+        'Acompanhamento de pele e alergia'
+    );
+
+    pr_insert_pet_veterinario(
+        5,
+        3,
+        SYSDATE,
+        1,
+        'Acompanhamento cardiológico'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: diario_entradas
+-- 3 originais + 2 novos = 5
+BEGIN
+
+    pr_insert_diario_entradas(
+        4,
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        'Rex apresentou coceira intensa',
+        'Irritado',
+        'PARCIAL'
+    );
+
+    pr_insert_diario_entradas(
+        5,
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        'Mel comeu normalmente e dormiu bem',
+        'Calma',
+        'COMPLETO'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: registros
+-- entradas 4 e 5 dos novos diários
+BEGIN
+
+    pr_insert_registros(
+        4,
+        'COMPORTAMENTO',
+        'COCEIRA',
+        8,
+        'episodios',
+        'Coceira ao longo da tarde',
+        CURRENT_TIMESTAMP
+    );
+
+    pr_insert_registros(
+        5,
+        'ALIMENTACAO',
+        'RACAO',
+        60,
+        'g',
+        'Porção da manhã',
+        CURRENT_TIMESTAMP
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: comentarios
+-- 3 originais + 2 novos = 5
+BEGIN
+
+    pr_insert_comentarios(
+        4,
+        4,
+        'Investigar possível alergia alimentar'
+    );
+
+    pr_insert_comentarios(
+        5,
+        6,
+        'Quadro estável no momento'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: insights
+-- 3 originais + 2 novos = 5
+BEGIN
+
+    pr_insert_insights(
+        4,
+        'ALERGIA_PELE',
+        'Episódios frequentes de coceira',
+        'REGRA_DERMATOLOGIA',
+        'ALTO',
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        NULL,
+        'SISTEMA',
+        'ATIVO',
+        '{"episodios":8}'
+    );
+
+    pr_insert_insights(
+        5,
+        'ROTINA_ESTAVEL',
+        'Alimentação e humor dentro do padrão',
+        'REGRA_ROTINA',
+        'BAIXO',
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        NULL,
+        'SISTEMA',
+        'ATIVO',
+        '{"status":"estavel"}'
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: solicitacoes
+-- 3 originais + 2 novos = 5
+BEGIN
+
+    pr_insert_solicitacoes(
+        4,
+        2,
+        2,
+        'ACEITA',
+        'Avaliação dermatológica do Rex',
+        CURRENT_TIMESTAMP
+    );
+
+    pr_insert_solicitacoes(
+        5,
+        5,
+        3,
+        'PENDENTE',
+        'Check-up cardiológico da Mel',
+        NULL
+    );
+
+END;
+
+
+-- (feedback Sprint 3) carga complementar: alertas
+-- 0 originais + 5 novos = 5
+BEGIN
+
+    pr_insert_alertas(
+        1,
+        1,
+        'CONSULTA',
+        'Retorno da Luna',
+        'Consulta de acompanhamento alimentar',
+        CURRENT_TIMESTAMP,
+        24,
+        NULL,
+        1
+    );
+
+    pr_insert_alertas(
+        2,
+        2,
+        'REMEDIO',
+        'Medicação da Mimi',
+        'Aplicar medicação tópica',
+        CURRENT_TIMESTAMP,
+        12,
+        NULL,
+        1
+    );
+
+    pr_insert_alertas(
+        3,
+        1,
+        'ALIMENTACAO',
+        'Dieta do Thor',
+        'Controlar porção diária',
+        CURRENT_TIMESTAMP,
+        8,
+        NULL,
+        1
+    );
+
+    pr_insert_alertas(
+        4,
+        2,
+        'EXERCICIO',
+        'Passeio do Rex',
+        'Caminhada curta para reduzir estresse',
+        CURRENT_TIMESTAMP,
+        24,
+        NULL,
+        1
+    );
+
+    pr_insert_alertas(
+        5,
+        3,
+        'OUTROS',
+        'Escovação da Mel',
+        'Escovar pelagem 3 vezes por semana',
+        CURRENT_TIMESTAMP,
+        48,
+        NULL,
+        1
+    );
+
+END;
+
+
+-- (feedback Sprint 3) conferência: quantidade mínima de 5 registros por tabela
+SELECT 'users'            AS tabela, COUNT(*) AS qtd FROM users
+UNION ALL SELECT 'veterinarios',     COUNT(*) FROM veterinarios
+UNION ALL SELECT 'pets',             COUNT(*) FROM pets
+UNION ALL SELECT 'pet_veterinario',  COUNT(*) FROM pet_veterinario
+UNION ALL SELECT 'diario_entradas',  COUNT(*) FROM diario_entradas
+UNION ALL SELECT 'registros',        COUNT(*) FROM registros
+UNION ALL SELECT 'comentarios',      COUNT(*) FROM comentarios
+UNION ALL SELECT 'insights',         COUNT(*) FROM insights
+UNION ALL SELECT 'solicitacoes',     COUNT(*) FROM solicitacoes
+UNION ALL SELECT 'alertas',          COUNT(*) FROM alertas
+ORDER BY tabela;
 
 
 /*Criar dois blocos anônimos para mostrar os dados inseridos, com pelo menos 3 consultas de junções (Joins) utilizando
@@ -1958,6 +2339,8 @@ END;
    valores novos da tabela REGISTROS.
     */
 
+-- (feedback Sprint 3) tabela: auditoria_registros
+-- Inclusão das colunas old_atualizado_em e new_atualizado_em.
 CREATE TABLE auditoria_registros (
     id_auditoria NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     usuario_bd VARCHAR2(100) NOT NULL,
@@ -1972,6 +2355,7 @@ CREATE TABLE auditoria_registros (
     old_unidade VARCHAR2(20),
     old_nota VARCHAR2(500),
     old_horario TIMESTAMP,
+    old_atualizado_em TIMESTAMP, -- (feedback Sprint 3) tabela: coluna old_atualizado_em
 
     new_id NUMBER,
     new_entrada_id NUMBER,
@@ -1980,8 +2364,16 @@ CREATE TABLE auditoria_registros (
     new_valor NUMBER(10,2),
     new_unidade VARCHAR2(20),
     new_nota VARCHAR2(500),
-    new_horario TIMESTAMP
+    new_horario TIMESTAMP,
+    new_atualizado_em TIMESTAMP -- (feedback Sprint 3) tabela: coluna new_atualizado_em
 );
+
+-- (feedback Sprint 3) tabela: auditoria_registros (banco já existente)
+-- Se a tabela já tiver sido criada sem as colunas, executar:
+-- ALTER TABLE auditoria_registros ADD (
+--     old_atualizado_em TIMESTAMP,
+--     new_atualizado_em TIMESTAMP
+-- );
 
 
 /* 
@@ -1990,6 +2382,8 @@ CREATE TABLE auditoria_registros (
    AFTER INSERT OR UPDATE OR DELETE ON REGISTROS
  */
 
+-- (feedback Sprint 3) trigger: trg_auditoria_registros
+-- Inclusão de old_atualizado_em e new_atualizado_em na auditoria DML.
 CREATE OR REPLACE TRIGGER trg_auditoria_registros
 AFTER INSERT OR UPDATE OR DELETE ON registros
 FOR EACH ROW
@@ -2008,7 +2402,8 @@ BEGIN
             new_valor,
             new_unidade,
             new_nota,
-            new_horario
+            new_horario,
+            new_atualizado_em -- (feedback Sprint 3) trigger: INSERT registra new_atualizado_em
         )
         VALUES (
             USER,
@@ -2021,7 +2416,8 @@ BEGIN
             :NEW.valor,
             :NEW.unidade,
             :NEW.nota,
-            :NEW.horario
+            :NEW.horario,
+            :NEW.atualizado_em
         );
 
     ELSIF UPDATING THEN
@@ -2038,6 +2434,7 @@ BEGIN
             old_unidade,
             old_nota,
             old_horario,
+            old_atualizado_em, -- (feedback Sprint 3) trigger: UPDATE registra old_atualizado_em
             new_id,
             new_entrada_id,
             new_tipo,
@@ -2045,7 +2442,8 @@ BEGIN
             new_valor,
             new_unidade,
             new_nota,
-            new_horario
+            new_horario,
+            new_atualizado_em -- (feedback Sprint 3) trigger: UPDATE registra new_atualizado_em
         )
         VALUES (
             USER,
@@ -2059,6 +2457,7 @@ BEGIN
             :OLD.unidade,
             :OLD.nota,
             :OLD.horario,
+            :OLD.atualizado_em,
             :NEW.id,
             :NEW.entrada_id,
             :NEW.tipo,
@@ -2066,7 +2465,8 @@ BEGIN
             :NEW.valor,
             :NEW.unidade,
             :NEW.nota,
-            :NEW.horario
+            :NEW.horario,
+            :NEW.atualizado_em
         );
 
     ELSIF DELETING THEN
@@ -2082,7 +2482,8 @@ BEGIN
             old_valor,
             old_unidade,
             old_nota,
-            old_horario
+            old_horario,
+            old_atualizado_em -- (feedback Sprint 3) trigger: DELETE registra old_atualizado_em
         )
         VALUES (
             USER,
@@ -2095,7 +2496,8 @@ BEGIN
             :OLD.valor,
             :OLD.unidade,
             :OLD.nota,
-            :OLD.horario
+            :OLD.horario,
+            :OLD.atualizado_em
         );
 
     END IF;
@@ -2137,10 +2539,11 @@ BEGIN
     )
     RETURNING id INTO v_id_registro;
 
-    -- UPDATE
+    -- (feedback Sprint 3) teste: trigger UPDATE com atualizado_em
     UPDATE registros
     SET valor = 20,
-        nota = 'Registro atualizado para testar UPDATE da trigger'
+        nota = 'Registro atualizado para testar UPDATE da trigger',
+        atualizado_em = CURRENT_TIMESTAMP
     WHERE id = v_id_registro;
 
     -- DELETE
@@ -2167,6 +2570,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('AUDITORIA DOS TESTES DA TRIGGER');
 
 
+    -- (feedback Sprint 3) evidência: print da auditoria com atualizado_em
     FOR r IN (
         SELECT
             id_auditoria,
@@ -2175,8 +2579,10 @@ BEGIN
             data_operacao,
             old_id,
             old_valor,
+            old_atualizado_em,
             new_id,
-            new_valor
+            new_valor,
+            new_atualizado_em
         FROM auditoria_registros
         ORDER BY id_auditoria
     )
@@ -2189,8 +2595,10 @@ BEGIN
             ' | DATA: ' || TO_CHAR(r.data_operacao, 'YYYY-MM-DD HH24:MI:SS') ||
             ' | OLD_ID: ' || NVL(TO_CHAR(r.old_id), 'NULL') ||
             ' | OLD_VALOR: ' || NVL(TO_CHAR(r.old_valor), 'NULL') ||
+            ' | OLD_ATUALIZADO_EM: ' || NVL(TO_CHAR(r.old_atualizado_em, 'YYYY-MM-DD HH24:MI:SS'), 'NULL') ||
             ' | NEW_ID: ' || NVL(TO_CHAR(r.new_id), 'NULL') ||
-            ' | NEW_VALOR: ' || NVL(TO_CHAR(r.new_valor), 'NULL')
+            ' | NEW_VALOR: ' || NVL(TO_CHAR(r.new_valor), 'NULL') ||
+            ' | NEW_ATUALIZADO_EM: ' || NVL(TO_CHAR(r.new_atualizado_em, 'YYYY-MM-DD HH24:MI:SS'), 'NULL')
         );
 
     END LOOP;
@@ -2230,6 +2638,7 @@ WHERE valor IS NOT NULL
 ORDER BY tipo, subtipo, id;
 
 
+-- (feedback Sprint 3) consulta: auditoria incluindo atualizado_em
 SELECT
     id_auditoria,
     usuario_bd,
@@ -2238,11 +2647,211 @@ SELECT
     old_tipo,
     old_subtipo,
     old_valor,
+    old_atualizado_em,
     new_tipo,
     new_subtipo,
-    new_valor
+    new_valor,
+    new_atualizado_em
 FROM auditoria_registros
 ORDER BY id_auditoria;
+
+
+-- (feedback Sprint 3) evidência: tratamentos de exceção de cada procedure
+-- Cada teste força um erro proposital, registra em logs_erros e imprime o último log.
+
+SET SERVEROUTPUT ON;
+
+DECLARE
+
+    PROCEDURE mostrar_ultimo_log(p_titulo IN VARCHAR2) IS
+        v_id            logs_erros.id%TYPE;
+        v_procedure     logs_erros.nome_procedure%TYPE;
+        v_usuario       logs_erros.usuario_bd%TYPE;
+        v_data          logs_erros.data_erro%TYPE;
+        v_codigo        logs_erros.codigo_erro%TYPE;
+        v_mensagem      logs_erros.mensagem_erro%TYPE;
+    BEGIN
+        SELECT
+            id,
+            nome_procedure,
+            usuario_bd,
+            data_erro,
+            codigo_erro,
+            mensagem_erro
+        INTO
+            v_id,
+            v_procedure,
+            v_usuario,
+            v_data,
+            v_codigo,
+            v_mensagem
+        FROM logs_erros
+        WHERE id = (SELECT MAX(id) FROM logs_erros);
+
+        DBMS_OUTPUT.PUT_LINE(p_titulo);
+        DBMS_OUTPUT.PUT_LINE(
+            '  LOG_ID=' || v_id ||
+            ' | PROCEDURE=' || v_procedure ||
+            ' | USUARIO=' || v_usuario ||
+            ' | DATA=' || TO_CHAR(v_data, 'YYYY-MM-DD HH24:MI:SS') ||
+            ' | SQLCODE=' || v_codigo ||
+            ' | MSG=' || v_mensagem
+        );
+        DBMS_OUTPUT.PUT_LINE('------------------------------------------------------------');
+    END;
+
+BEGIN
+
+    DBMS_OUTPUT.PUT_LINE('===== EVIDENCIAS DE EXCECAO =====');
+
+    -- (feedback Sprint 3) evidência: pr_insert_users / DUP_VAL_ON_INDEX
+    pr_insert_users(
+        'Ana Souza',
+        'ana@email.com',
+        '123',
+        '11999990001',
+        'TUTOR'
+    );
+    mostrar_ultimo_log('1) pr_insert_users -> DUP_VAL_ON_INDEX (email duplicado)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_users / OTHERS
+    pr_insert_users(
+        'Usuario Invalido',
+        'invalido@email.com',
+        '123',
+        '11999990099',
+        'ADMIN'
+    );
+    mostrar_ultimo_log('2) pr_insert_users -> OTHERS (tipo_usuario inválido)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_veterinarios / OTHERS
+    pr_insert_veterinarios(
+        99999,
+        'CRMV-XX-0000',
+        'Teste',
+        'FK inexistente'
+    );
+    mostrar_ultimo_log('3) pr_insert_veterinarios -> OTHERS (user_id inexistente)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_pets / OTHERS
+    pr_insert_pets(
+        99999,
+        'Pet Fantasma',
+        'Cachorro',
+        'SRD',
+        TO_DATE('2020-01-01','YYYY-MM-DD'),
+        'FK inexistente'
+    );
+    mostrar_ultimo_log('4) pr_insert_pets -> OTHERS (user_id inexistente)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_pet_veterinario / OTHERS
+    pr_insert_pet_veterinario(
+        99999,
+        1,
+        SYSDATE,
+        1,
+        'FK inexistente'
+    );
+    mostrar_ultimo_log('5) pr_insert_pet_veterinario -> OTHERS (pet_id inexistente)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_diario_entradas / DUP_VAL_ON_INDEX
+    pr_insert_diario_entradas(
+        1,
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        'Duplicata proposital',
+        'Teste',
+        'COMPLETO'
+    );
+    mostrar_ultimo_log('6) pr_insert_diario_entradas -> DUP_VAL_ON_INDEX (pet+data duplicados)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_diario_entradas / OTHERS
+    pr_insert_diario_entradas(
+        1,
+        TO_DATE('2026-05-12','YYYY-MM-DD'),
+        'Status inválido',
+        'Teste',
+        'CANCELADO'
+    );
+    mostrar_ultimo_log('7) pr_insert_diario_entradas -> OTHERS (status inválido)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_registros / OTHERS
+    pr_insert_registros(
+        99999,
+        'TESTE',
+        'TESTE',
+        1,
+        'un',
+        'FK inexistente',
+        CURRENT_TIMESTAMP
+    );
+    mostrar_ultimo_log('8) pr_insert_registros -> OTHERS (entrada_id inexistente)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_comentarios / OTHERS
+    pr_insert_comentarios(
+        99999,
+        1,
+        'FK inexistente'
+    );
+    mostrar_ultimo_log('9) pr_insert_comentarios -> OTHERS (entrada_id inexistente)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_insights / OTHERS
+    pr_insert_insights(
+        1,
+        'TESTE',
+        'Nível inválido',
+        'TESTE',
+        'CRITICO',
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        NULL,
+        'TESTE',
+        'ATIVO',
+        '{"teste":true}'
+    );
+    mostrar_ultimo_log('10) pr_insert_insights -> OTHERS (nivel_alerta inválido)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_solicitacoes / OTHERS
+    pr_insert_solicitacoes(
+        1,
+        1,
+        1,
+        'CANCELADA',
+        'Status inválido',
+        NULL
+    );
+    mostrar_ultimo_log('11) pr_insert_solicitacoes -> OTHERS (status inválido)');
+
+    -- (feedback Sprint 3) evidência: pr_insert_alertas / OTHERS
+    pr_insert_alertas(
+        1,
+        1,
+        'VACINA',
+        'Tipo inválido',
+        'Teste de exceção',
+        CURRENT_TIMESTAMP,
+        24,
+        NULL,
+        1
+    );
+    mostrar_ultimo_log('12) pr_insert_alertas -> OTHERS (tipo inválido)');
+
+    DBMS_OUTPUT.PUT_LINE('13) pr_relatorio_pets_json / pr_relatorio_registros_agrupado');
+    DBMS_OUTPUT.PUT_LINE('    NO_DATA_FOUND só ocorre com tabela vazia.');
+    DBMS_OUTPUT.PUT_LINE('    Não apagamos os dados da entrega para preservar a carga >= 5.');
+    DBMS_OUTPUT.PUT_LINE('===== FIM DAS EVIDENCIAS DE EXCECAO =====');
+
+END;
+
+
+-- (feedback Sprint 3) consulta: grid de logs_erros para documentação técnica
+SELECT
+    id,
+    nome_procedure,
+    usuario_bd,
+    TO_CHAR(data_erro, 'YYYY-MM-DD HH24:MI:SS') AS data_erro,
+    codigo_erro,
+    mensagem_erro
+FROM logs_erros
+ORDER BY id;
 
 
 
