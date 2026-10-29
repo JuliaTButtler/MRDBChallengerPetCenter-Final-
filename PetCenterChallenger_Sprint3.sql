@@ -1098,7 +1098,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: pets
--- 3 originais + 2 novos = 5
+
 BEGIN
 
     pr_insert_pets(
@@ -1123,7 +1123,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: pet_veterinario
--- 3 originais + 2 novos = 5
+
 BEGIN
 
     pr_insert_pet_veterinario(
@@ -1146,7 +1146,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: diario_entradas
--- 3 originais + 2 novos = 5
+
 BEGIN
 
     pr_insert_diario_entradas(
@@ -1196,7 +1196,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: comentarios
--- 3 originais + 2 novos = 5
+
 BEGIN
 
     pr_insert_comentarios(
@@ -1215,7 +1215,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: insights
--- 3 originais + 2 novos = 5
+
 BEGIN
 
     pr_insert_insights(
@@ -1248,7 +1248,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: solicitacoes
--- 3 originais + 2 novos = 5
+
 BEGIN
 
     pr_insert_solicitacoes(
@@ -1273,7 +1273,7 @@ END;
 
 
 -- (feedback Sprint 3) carga complementar: alertas
--- 0 originais + 5 novos = 5
+
 BEGIN
 
     pr_insert_alertas(
@@ -1350,7 +1350,7 @@ UNION ALL SELECT 'comentarios',      COUNT(*) FROM comentarios
 UNION ALL SELECT 'insights',         COUNT(*) FROM insights
 UNION ALL SELECT 'solicitacoes',     COUNT(*) FROM solicitacoes
 UNION ALL SELECT 'alertas',          COUNT(*) FROM alertas
-ORDER BY tabela;
+ORDER BY 1;
 
 
 /*Criar dois blocos anônimos para mostrar os dados inseridos, com pelo menos 3 consultas de junções (Joins) utilizando
