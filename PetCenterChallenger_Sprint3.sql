@@ -2032,6 +2032,9 @@ CREATE OR REPLACE PACKAGE pkg_petcenter_relatorios AS
 
     PROCEDURE pr_relatorio_registros_agrupado;
 
+    -- (Sprint 4) dataset NoSQL: array de pets com documentos aninhados
+    FUNCTION fn_dataset_pets_json RETURN CLOB;
+
 END pkg_petcenter_relatorios;
 /
 
@@ -2459,6 +2462,314 @@ EXCEPTION
         );
 
     END pr_relatorio_registros_agrupado;
+
+    -- (Sprint 4) export JSON aninhado para MongoDB
+    -- Um documento por pet: tutor, veterinario, diario (com registros e
+    -- comentarios), insights e alertas. Sem JSON_OBJECT / TO_JSON.
+    FUNCTION fn_dataset_pets_json
+    RETURN CLOB
+    IS
+        v_json CLOB := '[';
+        v_primeiro_pet BOOLEAN := TRUE;
+        v_primeiro_item BOOLEAN;
+
+        v_idade NUMBER;
+        v_vet_id veterinarios.id%TYPE;
+        v_vet_nome users.nome%TYPE;
+        v_vet_crmv veterinarios.crmv%TYPE;
+        v_vet_esp veterinarios.especialidade%TYPE;
+
+        FUNCTION escapar(p_texto VARCHAR2) RETURN VARCHAR2 IS
+        BEGIN
+            RETURN REPLACE(REPLACE(REPLACE(NVL(p_texto, ''), '\', '\\'), '"', '\"'), CHR(10), '\n');
+        END;
+
+        FUNCTION texto(p_texto VARCHAR2) RETURN VARCHAR2 IS
+        BEGIN
+            IF p_texto IS NULL THEN
+                RETURN 'null';
+            END IF;
+            RETURN '"' || escapar(p_texto) || '"';
+        END;
+
+        FUNCTION numero(p_num NUMBER) RETURN VARCHAR2 IS
+        BEGIN
+            IF p_num IS NULL THEN
+                RETURN 'null';
+            END IF;
+            RETURN TRIM(TO_CHAR(p_num, '9999999990.99'));
+        END;
+    BEGIN
+
+        FOR p IN (
+            SELECT
+                pet.id,
+                pet.nome,
+                pet.especie,
+                pet.raca,
+                pet.data_nascimento,
+                pet.observacoes,
+                tutor.id AS tutor_id,
+                tutor.nome AS tutor_nome,
+                tutor.email AS tutor_email,
+                tutor.telefone AS tutor_telefone
+            FROM pets pet
+            JOIN users tutor
+                ON tutor.id = pet.user_id
+            ORDER BY pet.id
+        ) LOOP
+
+            IF NOT v_primeiro_pet THEN
+                v_json := v_json || ',';
+            END IF;
+            v_primeiro_pet := FALSE;
+
+            v_idade := fn_calcular_idade_pet(p.id);
+
+            BEGIN
+                SELECT
+                    v.id,
+                    u.nome,
+                    v.crmv,
+                    v.especialidade
+                INTO
+                    v_vet_id,
+                    v_vet_nome,
+                    v_vet_crmv,
+                    v_vet_esp
+                FROM pet_veterinario pv
+                JOIN veterinarios v
+                    ON v.id = pv.veterinario_id
+                JOIN users u
+                    ON u.id = v.user_id
+                WHERE pv.pet_id = p.id
+                  AND pv.ativo = 1
+                  AND ROWNUM = 1;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_vet_id := NULL;
+                    v_vet_nome := NULL;
+                    v_vet_crmv := NULL;
+                    v_vet_esp := NULL;
+            END;
+
+            v_json := v_json || '{';
+            v_json := v_json || '"pet_id":' || TO_CHAR(p.id);
+            v_json := v_json || ',"nome":' || texto(p.nome);
+            v_json := v_json || ',"especie":' || texto(p.especie);
+            v_json := v_json || ',"raca":' || texto(p.raca);
+            v_json := v_json || ',"data_nascimento":' || texto(TO_CHAR(p.data_nascimento, 'YYYY-MM-DD'));
+            v_json := v_json || ',"idade_anos":' || numero(v_idade);
+            v_json := v_json || ',"observacoes":' || texto(p.observacoes);
+
+            v_json := v_json || ',"tutor":{';
+            v_json := v_json || '"id":' || TO_CHAR(p.tutor_id);
+            v_json := v_json || ',"nome":' || texto(p.tutor_nome);
+            v_json := v_json || ',"email":' || texto(p.tutor_email);
+            v_json := v_json || ',"telefone":' || texto(p.tutor_telefone);
+            v_json := v_json || '}';
+
+            IF v_vet_id IS NULL THEN
+                v_json := v_json || ',"veterinario":null';
+            ELSE
+                v_json := v_json || ',"veterinario":{';
+                v_json := v_json || '"id":' || TO_CHAR(v_vet_id);
+                v_json := v_json || ',"nome":' || texto(v_vet_nome);
+                v_json := v_json || ',"crmv":' || texto(v_vet_crmv);
+                v_json := v_json || ',"especialidade":' || texto(v_vet_esp);
+                v_json := v_json || '}';
+            END IF;
+
+            -- diario + registros + comentarios
+            v_json := v_json || ',"diario":[';
+            v_primeiro_item := TRUE;
+
+            FOR d IN (
+                SELECT
+                    id,
+                    data,
+                    resumo,
+                    humor_geral,
+                    status
+                FROM diario_entradas
+                WHERE pet_id = p.id
+                ORDER BY data, id
+            ) LOOP
+
+                IF NOT v_primeiro_item THEN
+                    v_json := v_json || ',';
+                END IF;
+                v_primeiro_item := FALSE;
+
+                v_json := v_json || '{';
+                v_json := v_json || '"id":' || TO_CHAR(d.id);
+                v_json := v_json || ',"data":' || texto(TO_CHAR(d.data, 'YYYY-MM-DD'));
+                v_json := v_json || ',"resumo":' || texto(d.resumo);
+                v_json := v_json || ',"humor_geral":' || texto(d.humor_geral);
+                v_json := v_json || ',"status":' || texto(d.status);
+
+                v_json := v_json || ',"registros":[';
+                DECLARE
+                    v_primeiro_reg BOOLEAN := TRUE;
+                BEGIN
+                    FOR r IN (
+                        SELECT
+                            id,
+                            tipo,
+                            subtipo,
+                            valor,
+                            unidade,
+                            nota,
+                            TO_CHAR(horario, 'YYYY-MM-DD HH24:MI:SS') AS horario
+                        FROM registros
+                        WHERE entrada_id = d.id
+                        ORDER BY id
+                    ) LOOP
+                        IF NOT v_primeiro_reg THEN
+                            v_json := v_json || ',';
+                        END IF;
+                        v_primeiro_reg := FALSE;
+
+                        v_json := v_json || '{';
+                        v_json := v_json || '"id":' || TO_CHAR(r.id);
+                        v_json := v_json || ',"tipo":' || texto(r.tipo);
+                        v_json := v_json || ',"subtipo":' || texto(r.subtipo);
+                        v_json := v_json || ',"valor":' || numero(r.valor);
+                        v_json := v_json || ',"unidade":' || texto(r.unidade);
+                        v_json := v_json || ',"nota":' || texto(r.nota);
+                        v_json := v_json || ',"horario":' || texto(r.horario);
+                        v_json := v_json || '}';
+                    END LOOP;
+                END;
+                v_json := v_json || ']';
+
+                v_json := v_json || ',"comentarios":[';
+                DECLARE
+                    v_primeiro_com BOOLEAN := TRUE;
+                BEGIN
+                    FOR c IN (
+                        SELECT
+                            com.id,
+                            com.comentario,
+                            u.nome AS autor,
+                            TO_CHAR(com.criado_em, 'YYYY-MM-DD HH24:MI:SS') AS criado_em
+                        FROM comentarios com
+                        JOIN users u
+                            ON u.id = com.user_id
+                        WHERE com.entrada_id = d.id
+                        ORDER BY com.id
+                    ) LOOP
+                        IF NOT v_primeiro_com THEN
+                            v_json := v_json || ',';
+                        END IF;
+                        v_primeiro_com := FALSE;
+
+                        v_json := v_json || '{';
+                        v_json := v_json || '"id":' || TO_CHAR(c.id);
+                        v_json := v_json || ',"autor":' || texto(c.autor);
+                        v_json := v_json || ',"comentario":' || texto(c.comentario);
+                        v_json := v_json || ',"criado_em":' || texto(c.criado_em);
+                        v_json := v_json || '}';
+                    END LOOP;
+                END;
+                v_json := v_json || ']';
+
+                v_json := v_json || '}';
+
+            END LOOP;
+
+            v_json := v_json || ']';
+
+            -- insights
+            v_json := v_json || ',"insights":[';
+            v_primeiro_item := TRUE;
+
+            FOR i IN (
+                SELECT
+                    id,
+                    tipo,
+                    descricao,
+                    origem_regra,
+                    nivel_alerta,
+                    TO_CHAR(data_inicio, 'YYYY-MM-DD') AS data_inicio,
+                    TO_CHAR(data_fim, 'YYYY-MM-DD') AS data_fim,
+                    gerado_por,
+                    status
+                FROM insights
+                WHERE pet_id = p.id
+                ORDER BY id
+            ) LOOP
+                IF NOT v_primeiro_item THEN
+                    v_json := v_json || ',';
+                END IF;
+                v_primeiro_item := FALSE;
+
+                v_json := v_json || '{';
+                v_json := v_json || '"id":' || TO_CHAR(i.id);
+                v_json := v_json || ',"tipo":' || texto(i.tipo);
+                v_json := v_json || ',"descricao":' || texto(i.descricao);
+                v_json := v_json || ',"origem_regra":' || texto(i.origem_regra);
+                v_json := v_json || ',"nivel_alerta":' || texto(i.nivel_alerta);
+                v_json := v_json || ',"data_inicio":' || texto(i.data_inicio);
+                v_json := v_json || ',"data_fim":' || texto(i.data_fim);
+                v_json := v_json || ',"gerado_por":' || texto(i.gerado_por);
+                v_json := v_json || ',"status":' || texto(i.status);
+                v_json := v_json || '}';
+            END LOOP;
+
+            v_json := v_json || ']';
+
+            -- alertas
+            v_json := v_json || ',"alertas":[';
+            v_primeiro_item := TRUE;
+
+            FOR a IN (
+                SELECT
+                    id,
+                    tipo,
+                    titulo,
+                    descricao,
+                    TO_CHAR(data_inicio, 'YYYY-MM-DD HH24:MI:SS') AS data_inicio,
+                    frequencia_horas,
+                    ativo
+                FROM alertas
+                WHERE pet_id = p.id
+                ORDER BY id
+            ) LOOP
+                IF NOT v_primeiro_item THEN
+                    v_json := v_json || ',';
+                END IF;
+                v_primeiro_item := FALSE;
+
+                v_json := v_json || '{';
+                v_json := v_json || '"id":' || TO_CHAR(a.id);
+                v_json := v_json || ',"tipo":' || texto(a.tipo);
+                v_json := v_json || ',"titulo":' || texto(a.titulo);
+                v_json := v_json || ',"descricao":' || texto(a.descricao);
+                v_json := v_json || ',"data_inicio":' || texto(a.data_inicio);
+                v_json := v_json || ',"frequencia_horas":' || numero(a.frequencia_horas);
+                v_json := v_json || ',"ativo":' || TO_CHAR(a.ativo);
+                v_json := v_json || '}';
+            END LOOP;
+
+            v_json := v_json || ']';
+            v_json := v_json || '}';
+
+        END LOOP;
+
+        v_json := v_json || ']';
+        RETURN v_json;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            pkg_petcenter_carga.pr_log_erro(
+                'pkg_petcenter_relatorios.fn_dataset_pets_json',
+                SQLCODE,
+                SQLERRM
+            );
+            RETURN '{"erro":"Falha ao gerar dataset JSON"}';
+
+    END fn_dataset_pets_json;
 
 END pkg_petcenter_relatorios;
 /
@@ -3169,6 +3480,16 @@ FROM user_objects
 WHERE object_name LIKE 'PKG_PETCENTER%'
    OR object_name = 'TRG_AUDITORIA_REGISTROS'
 ORDER BY object_type, object_name;
+
+
+-- ============================================================
+-- 9. EXPORT JSON PARA MONGODB (Sprint 4)
+-- Rode só este SELECT (F9) depois que o package estiver VALID.
+-- No grid: clique duas vezes no CLOB -> copie tudo ->
+-- cole num arquivo chamado petcenter_dataset.json
+-- ============================================================
+SELECT pkg_petcenter_relatorios.fn_dataset_pets_json() AS dataset_json
+FROM dual;
 
 
 
