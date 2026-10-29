@@ -1,4 +1,92 @@
--- Tabelas Criadas:
+-- PET CENTER - SCRIPT COMPLETO (Sprints 1 a 4)
+-- Executar inteiro com F5 (Run Script) em schema vazio ou já usado.
+-- Este bloco inicial apaga objetos anteriores para o professor
+-- testar do zero, sem ALTER TABLE.
+
+-- 0. LIMPEZA DO SCHEMA
+BEGIN
+
+    BEGIN
+        EXECUTE IMMEDIATE 'DROP TRIGGER trg_auditoria_registros';
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE != -4080 THEN
+                RAISE;
+            END IF;
+    END;
+
+    FOR r IN (
+        SELECT object_name
+        FROM user_objects
+        WHERE object_type = 'PACKAGE'
+          AND object_name IN (
+              'PKG_PETCENTER_CARGA',
+              'PKG_PETCENTER_RELATORIOS',
+              'PKG_PETCENTER_AUDITORIA'
+          )
+    ) LOOP
+        EXECUTE IMMEDIATE 'DROP PACKAGE ' || r.object_name;
+    END LOOP;
+
+    FOR r IN (
+        SELECT object_type, object_name
+        FROM user_objects
+        WHERE object_type IN ('PROCEDURE', 'FUNCTION')
+          AND object_name IN (
+              'PR_LOG_ERRO',
+              'PR_INSERT_USERS',
+              'PR_INSERT_VETERINARIOS',
+              'PR_INSERT_PETS',
+              'PR_INSERT_PET_VETERINARIO',
+              'PR_INSERT_DIARIO_ENTRADAS',
+              'PR_INSERT_REGISTROS',
+              'PR_INSERT_COMENTARIOS',
+              'PR_INSERT_INSIGHTS',
+              'PR_INSERT_SOLICITACOES',
+              'PR_INSERT_ALERTAS',
+              'PR_RELATORIO_PETS_JSON',
+              'PR_RELATORIO_REGISTROS_AGRUPADO',
+              'FN_PET_JSON',
+              'FN_CALCULAR_IDADE_PET'
+          )
+    ) LOOP
+        EXECUTE IMMEDIATE 'DROP ' || r.object_type || ' ' || r.object_name;
+    END LOOP;
+
+    FOR r IN (
+        SELECT table_name FROM (
+            SELECT 'ALERTAS'              AS table_name, 1  AS ord FROM dual UNION ALL
+            SELECT 'SOLICITACOES',                       2  FROM dual UNION ALL
+            SELECT 'INSIGHTS',                           3  FROM dual UNION ALL
+            SELECT 'COMENTARIOS',                        4  FROM dual UNION ALL
+            SELECT 'AUDITORIA_REGISTROS',                5  FROM dual UNION ALL
+            SELECT 'REGISTROS',                          6  FROM dual UNION ALL
+            SELECT 'DIARIO_ENTRADAS',                    7  FROM dual UNION ALL
+            SELECT 'PET_VETERINARIO',                    8  FROM dual UNION ALL
+            SELECT 'PETS',                               9  FROM dual UNION ALL
+            SELECT 'VETERINARIOS',                       10 FROM dual UNION ALL
+            SELECT 'USERS',                              11 FROM dual UNION ALL
+            SELECT 'LOGS_ERROS',                         12 FROM dual
+        )
+        ORDER BY ord
+    ) LOOP
+        BEGIN
+            EXECUTE IMMEDIATE 'DROP TABLE ' || r.table_name || ' CASCADE CONSTRAINTS';
+        EXCEPTION
+            WHEN OTHERS THEN
+                IF SQLCODE != -942 THEN
+                    RAISE;
+                END IF;
+        END;
+    END LOOP;
+
+END;
+/
+
+-- ============================================================
+-- 1. TABELAS
+-- ============================================================
+
 -- 1. USERS
 
 CREATE TABLE users (
@@ -247,38 +335,185 @@ CREATE TABLE logs_erros (
     data_erro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     codigo_erro NUMBER,
     mensagem_erro VARCHAR2(4000)
-);  
+);
 
-CREATE OR REPLACE PROCEDURE pr_log_erro (
-    p_nome_procedure IN VARCHAR2,
-    p_codigo_erro    IN NUMBER,
-    p_mensagem_erro  IN VARCHAR2
-)
-IS
-BEGIN
+-- (feedback Sprint 3) tabela: auditoria_registros
+-- Já nasce com old_atualizado_em e new_atualizado_em (sem ALTER TABLE).
+CREATE TABLE auditoria_registros (
+    id_auditoria NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    usuario_bd VARCHAR2(100) NOT NULL,
+    tipo_operacao VARCHAR2(10) NOT NULL,
+    data_operacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    INSERT INTO logs_erros (
-        nome_procedure,
-        usuario_bd,
-        data_erro,
-        codigo_erro,
-        mensagem_erro
-    )
-    VALUES (
-        p_nome_procedure,
-        USER,
-        CURRENT_TIMESTAMP,
-        p_codigo_erro,
-        p_mensagem_erro
+    old_id NUMBER,
+    old_entrada_id NUMBER,
+    old_tipo VARCHAR2(50),
+    old_subtipo VARCHAR2(50),
+    old_valor NUMBER(10,2),
+    old_unidade VARCHAR2(20),
+    old_nota VARCHAR2(500),
+    old_horario TIMESTAMP,
+    old_atualizado_em TIMESTAMP,
+
+    new_id NUMBER,
+    new_entrada_id NUMBER,
+    new_tipo VARCHAR2(50),
+    new_subtipo VARCHAR2(50),
+    new_valor NUMBER(10,2),
+    new_unidade VARCHAR2(20),
+    new_nota VARCHAR2(500),
+    new_horario TIMESTAMP,
+    new_atualizado_em TIMESTAMP
+);
+
+-- ============================================================
+-- 2. PACKAGES (Sprint 4)
+-- pkg_petcenter_carga: aqui (precisa existir antes da carga).
+-- pkg_petcenter_relatorios: seção 5
+-- pkg_petcenter_auditoria: seção 6
+-- SPRINT 4 - EMPACOTAMENTO
+-- Objetos avulsos (procedures/funções) passam a viver em packages.
+-- Trigger permanece fora do package (limitação do Oracle) e
+-- chama a lógica empacotada.
+-- ============================================================
+
+-- (Sprint 4) package spec: pkg_petcenter_carga
+-- Agrupa log de erros e todas as procedures de carga (INSERT).
+CREATE OR REPLACE PACKAGE pkg_petcenter_carga AS
+
+    PROCEDURE pr_log_erro (
+        p_nome_procedure IN VARCHAR2,
+        p_codigo_erro    IN NUMBER,
+        p_mensagem_erro  IN VARCHAR2
     );
 
-    COMMIT;
+    PROCEDURE pr_insert_users (
+        p_nome           IN VARCHAR2,
+        p_email          IN VARCHAR2,
+        p_senha          IN VARCHAR2,
+        p_telefone       IN VARCHAR2,
+        p_tipo_usuario   IN VARCHAR2
+    );
 
-END;
+    PROCEDURE pr_insert_veterinarios (
+        p_user_id        IN NUMBER,
+        p_crmv           IN VARCHAR2,
+        p_especialidade  IN VARCHAR2,
+        p_descricao      IN VARCHAR2
+    );
+
+    PROCEDURE pr_insert_pets (
+        p_user_id          IN NUMBER,
+        p_nome             IN VARCHAR2,
+        p_especie          IN VARCHAR2,
+        p_raca             IN VARCHAR2,
+        p_data_nascimento  IN DATE,
+        p_observacoes      IN VARCHAR2
+    );
+
+    PROCEDURE pr_insert_pet_veterinario (
+        p_pet_id           IN NUMBER,
+        p_veterinario_id   IN NUMBER,
+        p_data_inicio      IN DATE,
+        p_ativo            IN NUMBER,
+        p_observacoes      IN VARCHAR2
+    );
+
+    PROCEDURE pr_insert_diario_entradas (
+        p_pet_id         IN NUMBER,
+        p_data           IN DATE,
+        p_resumo         IN VARCHAR2,
+        p_humor_geral    IN VARCHAR2,
+        p_status         IN VARCHAR2
+    );
+
+    PROCEDURE pr_insert_registros (
+        p_entrada_id     IN NUMBER,
+        p_tipo           IN VARCHAR2,
+        p_subtipo        IN VARCHAR2,
+        p_valor          IN NUMBER,
+        p_unidade        IN VARCHAR2,
+        p_nota           IN VARCHAR2,
+        p_horario        IN TIMESTAMP
+    );
+
+    PROCEDURE pr_insert_comentarios (
+        p_entrada_id    IN NUMBER,
+        p_user_id       IN NUMBER,
+        p_comentario    IN VARCHAR2
+    );
+
+    PROCEDURE pr_insert_insights (
+        p_pet_id           IN NUMBER,
+        p_tipo             IN VARCHAR2,
+        p_descricao        IN VARCHAR2,
+        p_origem_regra     IN VARCHAR2,
+        p_nivel_alerta     IN VARCHAR2,
+        p_data_inicio      IN DATE,
+        p_data_fim         IN DATE,
+        p_gerado_por       IN VARCHAR2,
+        p_status           IN VARCHAR2,
+        p_contexto         IN CLOB
+    );
+
+    PROCEDURE pr_insert_solicitacoes (
+        p_pet_id           IN NUMBER,
+        p_tutor_id         IN NUMBER,
+        p_veterinario_id   IN NUMBER,
+        p_status           IN VARCHAR2,
+        p_mensagem         IN VARCHAR2,
+        p_respondido_em    IN TIMESTAMP
+    );
+
+    PROCEDURE pr_insert_alertas (
+        p_pet_id            IN NUMBER,
+        p_veterinario_id    IN NUMBER,
+        p_tipo              IN VARCHAR2,
+        p_titulo            IN VARCHAR2,
+        p_descricao         IN VARCHAR2,
+        p_data_inicio       IN TIMESTAMP,
+        p_frequencia_horas  IN NUMBER,
+        p_data_fim          IN TIMESTAMP,
+        p_ativo             IN NUMBER
+    );
+
+END pkg_petcenter_carga;
+/
 
 
--- user
-CREATE OR REPLACE PROCEDURE pr_insert_users (
+-- (Sprint 4) package body: pkg_petcenter_carga
+CREATE OR REPLACE PACKAGE BODY pkg_petcenter_carga AS
+
+    PROCEDURE pr_log_erro (
+        p_nome_procedure IN VARCHAR2,
+        p_codigo_erro    IN NUMBER,
+        p_mensagem_erro  IN VARCHAR2
+    )
+    IS
+    BEGIN
+
+        INSERT INTO logs_erros (
+            nome_procedure,
+            usuario_bd,
+            data_erro,
+            codigo_erro,
+            mensagem_erro
+        )
+        VALUES (
+            p_nome_procedure,
+            USER,
+            CURRENT_TIMESTAMP,
+            p_codigo_erro,
+            p_mensagem_erro
+        );
+
+        COMMIT;
+
+    END pr_log_erro;
+
+
+    -- user
+    PROCEDURE pr_insert_users (
     p_nome           IN VARCHAR2,
     p_email          IN VARCHAR2,
     p_senha          IN VARCHAR2,
@@ -308,19 +543,18 @@ BEGIN
 EXCEPTION
 
     WHEN DUP_VAL_ON_INDEX THEN
-        pr_log_erro('pr_insert_users', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_users', SQLCODE, SQLERRM);
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_users', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_users', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_users', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_users', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_users;
 
--- veterinarios
-
-CREATE OR REPLACE PROCEDURE pr_insert_veterinarios (
+    -- veterinarios
+    PROCEDURE pr_insert_veterinarios (
     p_user_id        IN NUMBER,
     p_crmv           IN VARCHAR2,
     p_especialidade  IN VARCHAR2,
@@ -347,18 +581,18 @@ BEGIN
 EXCEPTION
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_veterinarios', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_veterinarios', SQLCODE, SQLERRM);
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_veterinarios', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_veterinarios', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_veterinarios', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_veterinarios', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_veterinarios;
 
--- pets
-CREATE OR REPLACE PROCEDURE pr_insert_pets (
+    -- pets
+    PROCEDURE pr_insert_pets (
     p_user_id          IN NUMBER,
     p_nome             IN VARCHAR2,
     p_especie          IN VARCHAR2,
@@ -391,18 +625,18 @@ BEGIN
 EXCEPTION
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_pets', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_pets', SQLCODE, SQLERRM);
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_pets', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_pets', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_pets', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_pets', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_pets;
 
--- pet e veterinario
-CREATE OR REPLACE PROCEDURE pr_insert_pet_veterinario (
+    -- pet e veterinario
+    PROCEDURE pr_insert_pet_veterinario (
     p_pet_id           IN NUMBER,
     p_veterinario_id   IN NUMBER,
     p_data_inicio      IN DATE,
@@ -432,18 +666,18 @@ BEGIN
 EXCEPTION
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_pet_veterinario', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_pet_veterinario', SQLCODE, SQLERRM);
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_pet_veterinario', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_pet_veterinario', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_pet_veterinario', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_pet_veterinario', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_pet_veterinario;
 
--- diario entradas
-CREATE OR REPLACE PROCEDURE pr_insert_diario_entradas (
+    -- diario entradas
+    PROCEDURE pr_insert_diario_entradas (
     p_pet_id         IN NUMBER,
     p_data           IN DATE,
     p_resumo         IN VARCHAR2,
@@ -473,19 +707,18 @@ BEGIN
 EXCEPTION
 
     WHEN DUP_VAL_ON_INDEX THEN
-        pr_log_erro('pr_insert_diario_entradas', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_diario_entradas', SQLCODE, SQLERRM);
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_diario_entradas', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_diario_entradas', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_diario_entradas', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_diario_entradas', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_diario_entradas;
 
--- registros
-
-CREATE OR REPLACE PROCEDURE pr_insert_registros (
+    -- registros
+    PROCEDURE pr_insert_registros (
     p_entrada_id     IN NUMBER,
     p_tipo           IN VARCHAR2,
     p_subtipo        IN VARCHAR2,
@@ -521,19 +754,18 @@ BEGIN
 EXCEPTION
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_registros', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_registros', SQLCODE, SQLERRM);
 
     WHEN INVALID_NUMBER THEN
-        pr_log_erro('pr_insert_registros', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_registros', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_registros', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_registros', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_registros;
 
--- comentarios
-
-CREATE OR REPLACE PROCEDURE pr_insert_comentarios (
+    -- comentarios
+    PROCEDURE pr_insert_comentarios (
     p_entrada_id    IN NUMBER,
     p_user_id       IN NUMBER,
     p_comentario    IN VARCHAR2
@@ -557,19 +789,18 @@ BEGIN
 EXCEPTION
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_comentarios', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_comentarios', SQLCODE, SQLERRM);
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_comentarios', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_comentarios', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_comentarios', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_comentarios', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_comentarios;
 
--- insights
-
-CREATE OR REPLACE PROCEDURE pr_insert_insights (
+    -- insights
+    PROCEDURE pr_insert_insights (
     p_pet_id           IN NUMBER,
     p_tipo             IN VARCHAR2,
     p_descricao        IN VARCHAR2,
@@ -614,19 +845,18 @@ BEGIN
 EXCEPTION
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_insights', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_insights', SQLCODE, SQLERRM);
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_insights', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_insights', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_insights', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_insights', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_insights;
 
--- solicitacoes
-
-CREATE OR REPLACE PROCEDURE pr_insert_solicitacoes (
+    -- solicitacoes
+    PROCEDURE pr_insert_solicitacoes (
     p_pet_id           IN NUMBER,
     p_tutor_id         IN NUMBER,
     p_veterinario_id   IN NUMBER,
@@ -659,20 +889,20 @@ BEGIN
 EXCEPTION
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_solicitacoes', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_solicitacoes', SQLCODE, SQLERRM);
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_solicitacoes', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_solicitacoes', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_solicitacoes', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_solicitacoes', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_solicitacoes;
 
--- (feedback Sprint 3) procedure: pr_insert_alertas
--- Tabela ALERTAS existia sem procedure de carga parametrizada.
-
-CREATE OR REPLACE PROCEDURE pr_insert_alertas (
+    -- (feedback Sprint 3) procedure: pr_insert_alertas
+    -- Tabela ALERTAS existia sem procedure de carga parametrizada.
+    -- (Sprint 4) empacotada em pkg_petcenter_carga
+    PROCEDURE pr_insert_alertas (
     p_pet_id            IN NUMBER,
     p_veterinario_id    IN NUMBER,
     p_tipo              IN VARCHAR2,
@@ -714,22 +944,28 @@ BEGIN
 EXCEPTION
 
     WHEN VALUE_ERROR THEN
-        pr_log_erro('pr_insert_alertas', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_alertas', SQLCODE, SQLERRM);
 
     WHEN NO_DATA_FOUND THEN
-        pr_log_erro('pr_insert_alertas', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_alertas', SQLCODE, SQLERRM);
 
     WHEN OTHERS THEN
-        pr_log_erro('pr_insert_alertas', SQLCODE, SQLERRM);
+        pr_log_erro('pkg_petcenter_carga.pr_insert_alertas', SQLCODE, SQLERRM);
 
-END;
+    END pr_insert_alertas;
 
--- inserindo valores
+END pkg_petcenter_carga;
+/
 
--- USERS
+-- ============================================================
+-- 3. CARGA DE DADOS (única)
+-- (feedback Sprint 3) pelo menos 5 registros em cada tabela
+-- ============================================================
+
+-- USERS (8)
 BEGIN
 
-    pr_insert_users(
+    pkg_petcenter_carga.pr_insert_users(
         'Ana Souza',
         'ana@email.com',
         '123',
@@ -737,7 +973,7 @@ BEGIN
         'TUTOR'
     );
 
-    pr_insert_users(
+    pkg_petcenter_carga.pr_insert_users(
         'Carlos Lima',
         'carlos@email.com',
         '123',
@@ -745,7 +981,7 @@ BEGIN
         'TUTOR'
     );
 
-    pr_insert_users(
+    pkg_petcenter_carga.pr_insert_users(
         'Dra. Mariana Alves',
         'mariana@email.com',
         '123',
@@ -753,7 +989,7 @@ BEGIN
         'VETERINARIO'
     );
 
-    pr_insert_users(
+    pkg_petcenter_carga.pr_insert_users(
         'Dr. Felipe Costa',
         'felipe@email.com',
         '123',
@@ -761,33 +997,88 @@ BEGIN
         'VETERINARIO'
     );
 
+    pkg_petcenter_carga.pr_insert_users(
+        'Beatriz Rocha',
+        'beatriz@email.com',
+        '123',
+        '11999990005',
+        'TUTOR'
+    );
+
+    pkg_petcenter_carga.pr_insert_users(
+        'Dr. Ricardo Mendes',
+        'ricardo@email.com',
+        '123',
+        '11999990006',
+        'VETERINARIO'
+    );
+
+    pkg_petcenter_carga.pr_insert_users(
+        'Dra. Paula Nunes',
+        'paula@email.com',
+        '123',
+        '11999990007',
+        'VETERINARIO'
+    );
+
+    pkg_petcenter_carga.pr_insert_users(
+        'Dr. Bruno Teixeira',
+        'bruno@email.com',
+        '123',
+        '11999990008',
+        'VETERINARIO'
+    );
+
 END;
+/
 
 
--- VETERINARIOS
+-- VETERINARIOS (5)
 BEGIN
 
-    pr_insert_veterinarios(
+    pkg_petcenter_carga.pr_insert_veterinarios(
         3,
         'CRMV-SP-1001',
         'Clínica Geral',
         'Especialista em pequenos animais'
     );
 
-    pr_insert_veterinarios(
+    pkg_petcenter_carga.pr_insert_veterinarios(
         4,
         'CRMV-SP-1002',
         'Dermatologia',
         'Atendimento especializado em cães e gatos'
     );
 
+    pkg_petcenter_carga.pr_insert_veterinarios(
+        6,
+        'CRMV-SP-1003',
+        'Cardiologia',
+        'Acompanhamento de cardiopatias em cães'
+    );
+
+    pkg_petcenter_carga.pr_insert_veterinarios(
+        7,
+        'CRMV-SP-1004',
+        'Nutrição',
+        'Planos alimentares para pets idosos'
+    );
+
+    pkg_petcenter_carga.pr_insert_veterinarios(
+        8,
+        'CRMV-SP-1005',
+        'Ortopedia',
+        'Reabilitação e lesões articulares'
+    );
+
 END;
+/
 
 
--- PETS
+-- PETS (5)
 BEGIN
 
-    pr_insert_pets(
+    pkg_petcenter_carga.pr_insert_pets(
         1,
         'Luna',
         'Cachorro',
@@ -796,7 +1087,7 @@ BEGIN
         'Pet muito dócil'
     );
 
-    pr_insert_pets(
+    pkg_petcenter_carga.pr_insert_pets(
         1,
         'Mimi',
         'Gato',
@@ -805,7 +1096,7 @@ BEGIN
         'Gosta de dormir o dia inteiro'
     );
 
-    pr_insert_pets(
+    pkg_petcenter_carga.pr_insert_pets(
         2,
         'Thor',
         'Cachorro',
@@ -814,12 +1105,31 @@ BEGIN
         'Muito ativo'
     );
 
-END;
+    pkg_petcenter_carga.pr_insert_pets(
+        2,
+        'Rex',
+        'Cachorro',
+        'Pastor Alemão',
+        TO_DATE('2018-11-02','YYYY-MM-DD'),
+        'Muito protetor'
+    );
 
--- PET_VETERINARIO
+    pkg_petcenter_carga.pr_insert_pets(
+        5,
+        'Mel',
+        'Gato',
+        'Persa',
+        TO_DATE('2022-01-18','YYYY-MM-DD'),
+        'Pelagem longa, requer escovação'
+    );
+
+END;
+/
+
+-- PET_VETERINARIO (5)
 BEGIN
 
-    pr_insert_pet_veterinario(
+    pkg_petcenter_carga.pr_insert_pet_veterinario(
         1,
         1,
         SYSDATE,
@@ -827,7 +1137,7 @@ BEGIN
         'Acompanhamento mensal'
     );
 
-    pr_insert_pet_veterinario(
+    pkg_petcenter_carga.pr_insert_pet_veterinario(
         2,
         2,
         SYSDATE,
@@ -835,7 +1145,7 @@ BEGIN
         'Acompanhamento dermatológico'
     );
 
-    pr_insert_pet_veterinario(
+    pkg_petcenter_carga.pr_insert_pet_veterinario(
         3,
         1,
         SYSDATE,
@@ -843,13 +1153,30 @@ BEGIN
         'Controle alimentar'
     );
 
+    pkg_petcenter_carga.pr_insert_pet_veterinario(
+        4,
+        2,
+        SYSDATE,
+        1,
+        'Acompanhamento de pele e alergia'
+    );
+
+    pkg_petcenter_carga.pr_insert_pet_veterinario(
+        5,
+        3,
+        SYSDATE,
+        1,
+        'Acompanhamento cardiológico'
+    );
+
 END;
+/
 
 
--- DIARIO_ENTRADAS
+-- DIARIO_ENTRADAS (5)
 BEGIN
 
-    pr_insert_diario_entradas(
+    pkg_petcenter_carga.pr_insert_diario_entradas(
         1,
         TO_DATE('2026-05-10','YYYY-MM-DD'),
         'Luna comeu menos que o normal',
@@ -857,7 +1184,7 @@ BEGIN
         'COMPLETO'
     );
 
-    pr_insert_diario_entradas(
+    pkg_petcenter_carga.pr_insert_diario_entradas(
         2,
         TO_DATE('2026-05-10','YYYY-MM-DD'),
         'Mimi dormiu bastante durante o dia',
@@ -865,7 +1192,7 @@ BEGIN
         'COMPLETO'
     );
 
-    pr_insert_diario_entradas(
+    pkg_petcenter_carga.pr_insert_diario_entradas(
         3,
         TO_DATE('2026-05-10','YYYY-MM-DD'),
         'Thor brincou muito no parque',
@@ -873,14 +1200,31 @@ BEGIN
         'COMPLETO'
     );
 
+    pkg_petcenter_carga.pr_insert_diario_entradas(
+        4,
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        'Rex apresentou coceira intensa',
+        'Irritado',
+        'PARCIAL'
+    );
+
+    pkg_petcenter_carga.pr_insert_diario_entradas(
+        5,
+        TO_DATE('2026-05-10','YYYY-MM-DD'),
+        'Mel comeu normalmente e dormiu bem',
+        'Calma',
+        'COMPLETO'
+    );
+
 END;
+/
 
 
--- REGISTROS
+-- REGISTROS (8)
 
 BEGIN
 
-    pr_insert_registros(
+    pkg_petcenter_carga.pr_insert_registros(
         1,
         'ALIMENTACAO',
         'RACAO',
@@ -890,7 +1234,7 @@ BEGIN
         CURRENT_TIMESTAMP
     );
 
-    pr_insert_registros(
+    pkg_petcenter_carga.pr_insert_registros(
         1,
         'COMPORTAMENTO',
         'QUIETO',
@@ -900,7 +1244,7 @@ BEGIN
         CURRENT_TIMESTAMP
     );
 
-    pr_insert_registros(
+    pkg_petcenter_carga.pr_insert_registros(
         2,
         'ATIVIDADE',
         'SONO',
@@ -910,7 +1254,7 @@ BEGIN
         CURRENT_TIMESTAMP
     );
 
-    pr_insert_registros(
+    pkg_petcenter_carga.pr_insert_registros(
         3,
         'ATIVIDADE',
         'EXERCICIO',
@@ -920,38 +1264,92 @@ BEGIN
         CURRENT_TIMESTAMP
     );
 
+    pkg_petcenter_carga.pr_insert_registros(
+        4,
+        'COMPORTAMENTO',
+        'COCEIRA',
+        8,
+        'episodios',
+        'Coceira ao longo da tarde',
+        CURRENT_TIMESTAMP
+    );
+
+    pkg_petcenter_carga.pr_insert_registros(
+        5,
+        'ALIMENTACAO',
+        'RACAO',
+        60,
+        'g',
+        'Porção da manhã',
+        CURRENT_TIMESTAMP
+    );
+
+    pkg_petcenter_carga.pr_insert_registros(
+        1,
+        'ALIMENTACAO',
+        'RACAO',
+        20,
+        'g',
+        'Complemento da alimentação',
+        CURRENT_TIMESTAMP
+    );
+
+    pkg_petcenter_carga.pr_insert_registros(
+        2,
+        'ALIMENTACAO',
+        'AGUA',
+        500,
+        'ml',
+        'Consumo de água',
+        CURRENT_TIMESTAMP
+    );
+
 END;
+/
 
 
--- COMENTARIOS
+-- COMENTARIOS (5)
 
 BEGIN
 
-    pr_insert_comentarios(
+    pkg_petcenter_carga.pr_insert_comentarios(
         1,
         3,
         'Monitorar alimentação nos próximos dias'
     );
 
-    pr_insert_comentarios(
+    pkg_petcenter_carga.pr_insert_comentarios(
         2,
         4,
         'Comportamento aparentemente normal'
     );
 
-    pr_insert_comentarios(
+    pkg_petcenter_carga.pr_insert_comentarios(
         3,
         3,
         'Excelente nível de atividade'
     );
 
+    pkg_petcenter_carga.pr_insert_comentarios(
+        4,
+        4,
+        'Investigar possível alergia alimentar'
+    );
+
+    pkg_petcenter_carga.pr_insert_comentarios(
+        5,
+        6,
+        'Quadro estável no momento'
+    );
+
 END;
+/
 
 
--- INSIGHTS
+-- INSIGHTS (5)
 BEGIN
 
-    pr_insert_insights(
+    pkg_petcenter_carga.pr_insert_insights(
         1,
         'ALIMENTACAO_BAIXA',
         'Redução alimentar identificada nos últimos 3 dias',
@@ -964,7 +1362,7 @@ BEGIN
         '{"variacao":"-30%"}'
     );
 
-    pr_insert_insights(
+    pkg_petcenter_carga.pr_insert_insights(
         2,
         'ATIVIDADE_REDUZIDA',
         'Baixa atividade detectada',
@@ -977,7 +1375,7 @@ BEGIN
         '{"atividade":"sono excessivo"}'
     );
 
-    pr_insert_insights(
+    pkg_petcenter_carga.pr_insert_insights(
         3,
         'ATIVIDADE_ALTA',
         'Nível de atividade acima da média',
@@ -990,235 +1388,7 @@ BEGIN
         '{"tempo_exercicio":"2h"}'
     );
 
-END;
-
-
--- SOLICITACOES
-BEGIN
-
-    pr_insert_solicitacoes(
-        1,
-        1,
-        1,
-        'ACEITA',
-        'Gostaria de acompanhamento mensal',
-        CURRENT_TIMESTAMP
-    );
-
-    pr_insert_solicitacoes(
-        2,
-        1,
-        2,
-        'PENDENTE',
-        'Preciso de ajuda com alergias',
-        NULL
-    );
-
-    pr_insert_solicitacoes(
-        3,
-        2,
-        1,
-        'ACEITA',
-        'Consulta preventiva',
-        CURRENT_TIMESTAMP
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar
--- Garantir pelo menos 5 registros em cada tabela de negócio.
-
--- (feedback Sprint 3) carga complementar: users
--- 4 originais + 4 novos = 8
-BEGIN
-
-    pr_insert_users(
-        'Beatriz Rocha',
-        'beatriz@email.com',
-        '123',
-        '11999990005',
-        'TUTOR'
-    );
-
-    pr_insert_users(
-        'Dr. Ricardo Mendes',
-        'ricardo@email.com',
-        '123',
-        '11999990006',
-        'VETERINARIO'
-    );
-
-    pr_insert_users(
-        'Dra. Paula Nunes',
-        'paula@email.com',
-        '123',
-        '11999990007',
-        'VETERINARIO'
-    );
-
-    pr_insert_users(
-        'Dr. Bruno Teixeira',
-        'bruno@email.com',
-        '123',
-        '11999990008',
-        'VETERINARIO'
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: veterinarios
--- 2 originais + 3 novos = 5
--- user_id 6, 7 e 8 = novos usuários do tipo VETERINARIO
-BEGIN
-
-    pr_insert_veterinarios(
-        6,
-        'CRMV-SP-1003',
-        'Cardiologia',
-        'Acompanhamento de cardiopatias em cães'
-    );
-
-    pr_insert_veterinarios(
-        7,
-        'CRMV-SP-1004',
-        'Nutrição',
-        'Planos alimentares para pets idosos'
-    );
-
-    pr_insert_veterinarios(
-        8,
-        'CRMV-SP-1005',
-        'Ortopedia',
-        'Reabilitação e lesões articulares'
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: pets
-
-BEGIN
-
-    pr_insert_pets(
-        2,
-        'Rex',
-        'Cachorro',
-        'Pastor Alemão',
-        TO_DATE('2018-11-02','YYYY-MM-DD'),
-        'Muito protetor'
-    );
-
-    pr_insert_pets(
-        5,
-        'Mel',
-        'Gato',
-        'Persa',
-        TO_DATE('2022-01-18','YYYY-MM-DD'),
-        'Pelagem longa, requer escovação'
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: pet_veterinario
-
-BEGIN
-
-    pr_insert_pet_veterinario(
-        4,
-        2,
-        SYSDATE,
-        1,
-        'Acompanhamento de pele e alergia'
-    );
-
-    pr_insert_pet_veterinario(
-        5,
-        3,
-        SYSDATE,
-        1,
-        'Acompanhamento cardiológico'
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: diario_entradas
-
-BEGIN
-
-    pr_insert_diario_entradas(
-        4,
-        TO_DATE('2026-05-10','YYYY-MM-DD'),
-        'Rex apresentou coceira intensa',
-        'Irritado',
-        'PARCIAL'
-    );
-
-    pr_insert_diario_entradas(
-        5,
-        TO_DATE('2026-05-10','YYYY-MM-DD'),
-        'Mel comeu normalmente e dormiu bem',
-        'Calma',
-        'COMPLETO'
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: registros
--- entradas 4 e 5 dos novos diários
-BEGIN
-
-    pr_insert_registros(
-        4,
-        'COMPORTAMENTO',
-        'COCEIRA',
-        8,
-        'episodios',
-        'Coceira ao longo da tarde',
-        CURRENT_TIMESTAMP
-    );
-
-    pr_insert_registros(
-        5,
-        'ALIMENTACAO',
-        'RACAO',
-        60,
-        'g',
-        'Porção da manhã',
-        CURRENT_TIMESTAMP
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: comentarios
-
-BEGIN
-
-    pr_insert_comentarios(
-        4,
-        4,
-        'Investigar possível alergia alimentar'
-    );
-
-    pr_insert_comentarios(
-        5,
-        6,
-        'Quadro estável no momento'
-    );
-
-END;
-
-
--- (feedback Sprint 3) carga complementar: insights
-
-BEGIN
-
-    pr_insert_insights(
+    pkg_petcenter_carga.pr_insert_insights(
         4,
         'ALERGIA_PELE',
         'Episódios frequentes de coceira',
@@ -1231,7 +1401,7 @@ BEGIN
         '{"episodios":8}'
     );
 
-    pr_insert_insights(
+    pkg_petcenter_carga.pr_insert_insights(
         5,
         'ROTINA_ESTAVEL',
         'Alimentação e humor dentro do padrão',
@@ -1245,13 +1415,40 @@ BEGIN
     );
 
 END;
+/
 
 
--- (feedback Sprint 3) carga complementar: solicitacoes
-
+-- SOLICITACOES (5)
 BEGIN
 
-    pr_insert_solicitacoes(
+    pkg_petcenter_carga.pr_insert_solicitacoes(
+        1,
+        1,
+        1,
+        'ACEITA',
+        'Gostaria de acompanhamento mensal',
+        CURRENT_TIMESTAMP
+    );
+
+    pkg_petcenter_carga.pr_insert_solicitacoes(
+        2,
+        1,
+        2,
+        'PENDENTE',
+        'Preciso de ajuda com alergias',
+        NULL
+    );
+
+    pkg_petcenter_carga.pr_insert_solicitacoes(
+        3,
+        2,
+        1,
+        'ACEITA',
+        'Consulta preventiva',
+        CURRENT_TIMESTAMP
+    );
+
+    pkg_petcenter_carga.pr_insert_solicitacoes(
         4,
         2,
         2,
@@ -1260,7 +1457,7 @@ BEGIN
         CURRENT_TIMESTAMP
     );
 
-    pr_insert_solicitacoes(
+    pkg_petcenter_carga.pr_insert_solicitacoes(
         5,
         5,
         3,
@@ -1270,13 +1467,13 @@ BEGIN
     );
 
 END;
+/
 
 
--- (feedback Sprint 3) carga complementar: alertas
-
+-- ALERTAS (5)
 BEGIN
 
-    pr_insert_alertas(
+    pkg_petcenter_carga.pr_insert_alertas(
         1,
         1,
         'CONSULTA',
@@ -1288,7 +1485,7 @@ BEGIN
         1
     );
 
-    pr_insert_alertas(
+    pkg_petcenter_carga.pr_insert_alertas(
         2,
         2,
         'REMEDIO',
@@ -1300,7 +1497,7 @@ BEGIN
         1
     );
 
-    pr_insert_alertas(
+    pkg_petcenter_carga.pr_insert_alertas(
         3,
         1,
         'ALIMENTACAO',
@@ -1312,7 +1509,7 @@ BEGIN
         1
     );
 
-    pr_insert_alertas(
+    pkg_petcenter_carga.pr_insert_alertas(
         4,
         2,
         'EXERCICIO',
@@ -1324,7 +1521,7 @@ BEGIN
         1
     );
 
-    pr_insert_alertas(
+    pkg_petcenter_carga.pr_insert_alertas(
         5,
         3,
         'OUTROS',
@@ -1337,6 +1534,7 @@ BEGIN
     );
 
 END;
+/
 
 
 -- (feedback Sprint 3) conferência: quantidade mínima de 5 registros por tabela
@@ -1352,6 +1550,10 @@ UNION ALL SELECT 'solicitacoes',     COUNT(*) FROM solicitacoes
 UNION ALL SELECT 'alertas',          COUNT(*) FROM alertas
 ORDER BY 1;
 
+
+-- ============================================================
+-- 4. RELATÓRIOS SPRINT 1 E 2
+-- ============================================================
 
 /*Criar dois blocos anônimos para mostrar os dados inseridos, com pelo menos 3 consultas de junções (Joins) utilizando
 agrupamento (group by) e ordenação (order by)*/
@@ -1402,6 +1604,7 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 
 -- Quantidade de insights por veterinário e nível de alerta
@@ -1456,6 +1659,7 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 /*Criar um bloco que deverá ler os dados de uma tabela e, na mesma linha, mostrar o valor de uma coluna da linha atual, o valor
 dessa mesma coluna na linha anterior e o valor dessa mesma coluna na próxima linha. Caso a linha anterior ou a próxima linha não
@@ -1529,6 +1733,7 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 /*Relatórios: crie quatro blocos anônimos que usem cursor explícito e tomada de decisão. Um dos blocos anônimos deve listar todos
 os dados de uma tabela, mostrar os dados numéricos sumarizados e mostrar a sumarização dos dados agrupados por um critério
@@ -1604,6 +1809,7 @@ BEGIN
     );
 
 END;
+/
 
 
 -- RELATÓRIO 2
@@ -1660,6 +1866,7 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 -- RELATÓRIO 3
 -- LISTAR SOLICITAÇÕES E EXIBIR SITUAÇÃO
@@ -1716,6 +1923,7 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 
 -- RELATÓRIO 4
@@ -1777,8 +1985,13 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 
+
+-- ============================================================
+-- 5. PACKAGE DE RELATÓRIOS + TESTES (Sprints 3 e 4)
+-- ============================================================
 
 /* 
    SPRINT 3 
@@ -1803,11 +2016,34 @@ END;
    JSON_QUERY, JSON_TABLE ou funções equivalentes de JSON.
  */
 
-CREATE OR REPLACE FUNCTION fn_pet_json (
-    p_pet_id IN NUMBER
-)
-RETURN VARCHAR2
-IS
+-- (Sprint 4) package spec: pkg_petcenter_relatorios
+-- Agrupa funções de negócio/JSON e as procedures de relatório da Sprint 3.
+CREATE OR REPLACE PACKAGE pkg_petcenter_relatorios AS
+
+    FUNCTION fn_pet_json (
+        p_pet_id IN NUMBER
+    ) RETURN VARCHAR2;
+
+    FUNCTION fn_calcular_idade_pet (
+        p_pet_id IN NUMBER
+    ) RETURN NUMBER;
+
+    PROCEDURE pr_relatorio_pets_json;
+
+    PROCEDURE pr_relatorio_registros_agrupado;
+
+END pkg_petcenter_relatorios;
+/
+
+
+-- (Sprint 4) package body: pkg_petcenter_relatorios
+CREATE OR REPLACE PACKAGE BODY pkg_petcenter_relatorios AS
+
+    FUNCTION fn_pet_json (
+        p_pet_id IN NUMBER
+    )
+    RETURN VARCHAR2
+    IS
     v_pet_id           pets.id%TYPE;
     v_nome_pet         pets.nome%TYPE;
     v_especie          pets.especie%TYPE;
@@ -1888,36 +2124,18 @@ EXCEPTION
             REPLACE(REPLACE(SQLERRM, '\', '\\'), '"', '\"') ||
             '"}';
 
-END;
+    END fn_pet_json;
 
--- Teste função 1
-
-SET SERVEROUTPUT ON;
-
-BEGIN
-
-    DBMS_OUTPUT.PUT_LINE('TESTE FUNÇÃO 1');
-    DBMS_OUTPUT.PUT_LINE(fn_pet_json(1));
-
-    DBMS_OUTPUT.PUT_LINE('TESTE DE EXCEÇÃO - PET INEXISTENTE');
-    DBMS_OUTPUT.PUT_LINE(fn_pet_json(99999));
-
-END;
-
-/* 
-   FUNÇÃO 2
-   Processo lógico do projeto:
-   calcula a idade do pet a partir da sua data de nascimento.
-
-   A função recebe o ID do pet, busca sua data de nascimento e
-   realiza o cálculo sem depender de uma coluna de idade armazenada.
-*/
-
-CREATE OR REPLACE FUNCTION fn_calcular_idade_pet (
-    p_pet_id IN NUMBER
-)
-RETURN NUMBER
-IS
+    /* 
+       FUNÇÃO 2
+       Processo lógico do projeto:
+       calcula a idade do pet a partir da sua data de nascimento.
+    */
+    FUNCTION fn_calcular_idade_pet (
+        p_pet_id IN NUMBER
+    )
+    RETURN NUMBER
+    IS
     v_data_nascimento pets.data_nascimento%TYPE;
     v_idade NUMBER;
 
@@ -1974,45 +2192,15 @@ EXCEPTION
         );
         RETURN NULL;
 
-END;
+    END fn_calcular_idade_pet;
 
--- Teste função 2
-
-SET SERVEROUTPUT ON;
-
-BEGIN
-
-    DBMS_OUTPUT.PUT_LINE('TESTE FUNÇÃO 2');
-    DBMS_OUTPUT.PUT_LINE(
-        'Idade da Luna: ' || fn_calcular_idade_pet(1) || ' anos'
-    );
-
-    DBMS_OUTPUT.PUT_LINE('TESTE DE EXCEÇÃO');
-    DBMS_OUTPUT.PUT_LINE(
-        'Idade do pet inexistente: ' ||
-        NVL(TO_CHAR(fn_calcular_idade_pet(99999)), 'NULL')
-    );
-
-END;
-
-
-
-/* 
-   PROCEDURE 1
-   Realiza JOIN entre várias tabelas e exibe os dados no formato
-   JSON utilizando a Função 1 criada pelo grupo.
-
-   A procedure faz o JOIN entre:
-   PETS
-   USERS
-   PET_VETERINARIO
-   VETERINARIOS
-
-   A transformação para JSON é feita pela FN_PET_JSON.
- */
-
-CREATE OR REPLACE PROCEDURE pr_relatorio_pets_json
-IS
+    /* 
+       PROCEDURE 1
+       Realiza JOIN entre várias tabelas e exibe os dados no formato
+       JSON utilizando a Função 1 criada pelo grupo.
+     */
+    PROCEDURE pr_relatorio_pets_json
+    IS
     v_quantidade NUMBER := 0;
 BEGIN
 
@@ -2063,8 +2251,8 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE(
             'ERRO pr_relatorio_pets_json: nenhum registro encontrado.'
         );
-        pr_log_erro(
-            'pr_relatorio_pets_json',
+        pkg_petcenter_carga.pr_log_erro(
+            'pkg_petcenter_relatorios.pr_relatorio_pets_json',
             SQLCODE,
             SQLERRM
         );
@@ -2073,8 +2261,8 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE(
             'ERRO pr_relatorio_pets_json: valor inválido.'
         );
-        pr_log_erro(
-            'pr_relatorio_pets_json',
+        pkg_petcenter_carga.pr_log_erro(
+            'pkg_petcenter_relatorios.pr_relatorio_pets_json',
             SQLCODE,
             SQLERRM
         );
@@ -2084,66 +2272,17 @@ EXCEPTION
             'ERRO pr_relatorio_pets_json: ' ||
             SQLCODE || ' - ' || SQLERRM
         );
-        pr_log_erro(
-            'pr_relatorio_pets_json',
+        pkg_petcenter_carga.pr_log_erro(
+            'pkg_petcenter_relatorios.pr_relatorio_pets_json',
             SQLCODE,
             SQLERRM
         );
 
-END;
+    END pr_relatorio_pets_json;
 
-
-
--- Teste procedure 1
-
-SET SERVEROUTPUT ON;
-
-BEGIN
-
-    pr_relatorio_pets_json;
-
-END;
-
-
-
-/* 
-   CARGA COMPLEMENTAR PARA A PROCEDURE 2
-
-   A tabela REGISTROS possuía 4 registros na versão anterior.
-   São adicionados 2 registros numéricos para garantir pelo menos
-   5 linhas com valores numéricos e também demonstrar a soma
-   manual de uma mesma combinação de categorias.
- */
-
-BEGIN
-
-    pr_insert_registros(
-        1,
-        'ALIMENTACAO',
-        'RACAO',
-        20,
-        'g',
-        'Complemento da alimentação',
-        CURRENT_TIMESTAMP
-    );
-
-    pr_insert_registros(
-        2,
-        'ALIMENTACAO',
-        'AGUA',
-        500,
-        'ml',
-        'Consumo de água',
-        CURRENT_TIMESTAMP
-    );
-
-END;
-
-
-
-/*
-   PROCEDURE 2
-   Usa a tabela REGISTROS como tabela de fatos.
+    /*
+       PROCEDURE 2
+       Usa a tabela REGISTROS como tabela de fatos.
 
    Categorias:
    1. TIPO
@@ -2164,8 +2303,8 @@ END;
    categorias que deixam de participar daquele nível.
 */
 
-CREATE OR REPLACE PROCEDURE pr_relatorio_registros_agrupado
-IS
+    PROCEDURE pr_relatorio_registros_agrupado
+    IS
     CURSOR c_registros IS
         SELECT
             tipo,
@@ -2292,8 +2431,8 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE(
             'ERRO pr_relatorio_registros_agrupado: nenhum registro numérico encontrado.'
         );
-        pr_log_erro(
-            'pr_relatorio_registros_agrupado',
+        pkg_petcenter_carga.pr_log_erro(
+            'pkg_petcenter_relatorios.pr_relatorio_registros_agrupado',
             SQLCODE,
             SQLERRM
         );
@@ -2302,8 +2441,8 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE(
             'ERRO pr_relatorio_registros_agrupado: valor inválido.'
         );
-        pr_log_erro(
-            'pr_relatorio_registros_agrupado',
+        pkg_petcenter_carga.pr_log_erro(
+            'pkg_petcenter_relatorios.pr_relatorio_registros_agrupado',
             SQLCODE,
             SQLERRM
         );
@@ -2313,77 +2452,288 @@ EXCEPTION
             'ERRO pr_relatorio_registros_agrupado: ' ||
             SQLCODE || ' - ' || SQLERRM
         );
-        pr_log_erro(
-            'pr_relatorio_registros_agrupado',
+        pkg_petcenter_carga.pr_log_erro(
+            'pkg_petcenter_relatorios.pr_relatorio_registros_agrupado',
             SQLCODE,
             SQLERRM
         );
 
-END;
+    END pr_relatorio_registros_agrupado;
 
--- Teste procedure 2
+END pkg_petcenter_relatorios;
+/
 
+-- (Sprint 4) teste: função 1 empacotada
 SET SERVEROUTPUT ON;
 
 BEGIN
 
-    pr_relatorio_registros_agrupado;
+    DBMS_OUTPUT.PUT_LINE('TESTE FUNÇÃO 1');
+    DBMS_OUTPUT.PUT_LINE(pkg_petcenter_relatorios.fn_pet_json(1));
+
+    DBMS_OUTPUT.PUT_LINE('TESTE DE EXCEÇÃO - PET INEXISTENTE');
+    DBMS_OUTPUT.PUT_LINE(pkg_petcenter_relatorios.fn_pet_json(99999));
 
 END;
+/
 
 
+-- (Sprint 4) teste: função 2 empacotada
+SET SERVEROUTPUT ON;
 
-/* 
-   TABELA DE AUDITORIA
-   Guarda usuário, operação, data/hora, valores anteriores e
-   valores novos da tabela REGISTROS.
-    */
+BEGIN
 
--- (feedback Sprint 3) tabela: auditoria_registros
--- Inclusão das colunas old_atualizado_em e new_atualizado_em.
-CREATE TABLE auditoria_registros (
-    id_auditoria NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    usuario_bd VARCHAR2(100) NOT NULL,
-    tipo_operacao VARCHAR2(10) NOT NULL,
-    data_operacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    DBMS_OUTPUT.PUT_LINE('TESTE FUNÇÃO 2');
+    DBMS_OUTPUT.PUT_LINE(
+        'Idade da Luna: ' || pkg_petcenter_relatorios.fn_calcular_idade_pet(1) || ' anos'
+    );
 
-    old_id NUMBER,
-    old_entrada_id NUMBER,
-    old_tipo VARCHAR2(50),
-    old_subtipo VARCHAR2(50),
-    old_valor NUMBER(10,2),
-    old_unidade VARCHAR2(20),
-    old_nota VARCHAR2(500),
-    old_horario TIMESTAMP,
-    old_atualizado_em TIMESTAMP, -- (feedback Sprint 3) tabela: coluna old_atualizado_em
+    DBMS_OUTPUT.PUT_LINE('TESTE DE EXCEÇÃO');
+    DBMS_OUTPUT.PUT_LINE(
+        'Idade do pet inexistente: ' ||
+        NVL(TO_CHAR(pkg_petcenter_relatorios.fn_calcular_idade_pet(99999)), 'NULL')
+    );
 
-    new_id NUMBER,
-    new_entrada_id NUMBER,
-    new_tipo VARCHAR2(50),
-    new_subtipo VARCHAR2(50),
-    new_valor NUMBER(10,2),
-    new_unidade VARCHAR2(20),
-    new_nota VARCHAR2(500),
-    new_horario TIMESTAMP,
-    new_atualizado_em TIMESTAMP -- (feedback Sprint 3) tabela: coluna new_atualizado_em
-);
+END;
+/
 
--- (feedback Sprint 3) tabela: auditoria_registros (banco já existente)
--- Se a tabela já tiver sido criada sem as colunas, executar:
--- ALTER TABLE auditoria_registros ADD (
---     old_atualizado_em TIMESTAMP,
---     new_atualizado_em TIMESTAMP
--- );
 
+-- (Sprint 4) teste: procedure 1 empacotada
+SET SERVEROUTPUT ON;
+
+BEGIN
+
+    pkg_petcenter_relatorios.pr_relatorio_pets_json;
+
+END;
+/
+
+
+-- (Sprint 4) teste: procedure 2 empacotada
+SET SERVEROUTPUT ON;
+
+BEGIN
+
+    pkg_petcenter_relatorios.pr_relatorio_registros_agrupado;
+
+END;
+/
+
+
+-- ============================================================
+-- 6. AUDITORIA: PACKAGE + TRIGGER FINA
+-- ============================================================
 
 /* 
    TRIGGER DE AUDITORIA DML
 
    AFTER INSERT OR UPDATE OR DELETE ON REGISTROS
+   (Sprint 4) a lógica vive no package; a trigger só dispara a procedure.
  */
 
--- (feedback Sprint 3) trigger: trg_auditoria_registros
--- Inclusão de old_atualizado_em e new_atualizado_em na auditoria DML.
+-- (Sprint 4) package spec: pkg_petcenter_auditoria
+CREATE OR REPLACE PACKAGE pkg_petcenter_auditoria AS
+
+    PROCEDURE pr_auditar_registros (
+        p_tipo_operacao     IN VARCHAR2,
+        p_old_id            IN NUMBER DEFAULT NULL,
+        p_old_entrada_id    IN NUMBER DEFAULT NULL,
+        p_old_tipo          IN VARCHAR2 DEFAULT NULL,
+        p_old_subtipo       IN VARCHAR2 DEFAULT NULL,
+        p_old_valor         IN NUMBER DEFAULT NULL,
+        p_old_unidade       IN VARCHAR2 DEFAULT NULL,
+        p_old_nota          IN VARCHAR2 DEFAULT NULL,
+        p_old_horario       IN TIMESTAMP DEFAULT NULL,
+        p_old_atualizado_em IN TIMESTAMP DEFAULT NULL,
+        p_new_id            IN NUMBER DEFAULT NULL,
+        p_new_entrada_id    IN NUMBER DEFAULT NULL,
+        p_new_tipo          IN VARCHAR2 DEFAULT NULL,
+        p_new_subtipo       IN VARCHAR2 DEFAULT NULL,
+        p_new_valor         IN NUMBER DEFAULT NULL,
+        p_new_unidade       IN VARCHAR2 DEFAULT NULL,
+        p_new_nota          IN VARCHAR2 DEFAULT NULL,
+        p_new_horario       IN TIMESTAMP DEFAULT NULL,
+        p_new_atualizado_em IN TIMESTAMP DEFAULT NULL
+    );
+
+END pkg_petcenter_auditoria;
+/
+
+-- (Sprint 4) package body: pkg_petcenter_auditoria
+CREATE OR REPLACE PACKAGE BODY pkg_petcenter_auditoria AS
+
+    PROCEDURE pr_auditar_registros (
+        p_tipo_operacao     IN VARCHAR2,
+        p_old_id            IN NUMBER DEFAULT NULL,
+        p_old_entrada_id    IN NUMBER DEFAULT NULL,
+        p_old_tipo          IN VARCHAR2 DEFAULT NULL,
+        p_old_subtipo       IN VARCHAR2 DEFAULT NULL,
+        p_old_valor         IN NUMBER DEFAULT NULL,
+        p_old_unidade       IN VARCHAR2 DEFAULT NULL,
+        p_old_nota          IN VARCHAR2 DEFAULT NULL,
+        p_old_horario       IN TIMESTAMP DEFAULT NULL,
+        p_old_atualizado_em IN TIMESTAMP DEFAULT NULL,
+        p_new_id            IN NUMBER DEFAULT NULL,
+        p_new_entrada_id    IN NUMBER DEFAULT NULL,
+        p_new_tipo          IN VARCHAR2 DEFAULT NULL,
+        p_new_subtipo       IN VARCHAR2 DEFAULT NULL,
+        p_new_valor         IN NUMBER DEFAULT NULL,
+        p_new_unidade       IN VARCHAR2 DEFAULT NULL,
+        p_new_nota          IN VARCHAR2 DEFAULT NULL,
+        p_new_horario       IN TIMESTAMP DEFAULT NULL,
+        p_new_atualizado_em IN TIMESTAMP DEFAULT NULL
+    )
+    IS
+    BEGIN
+
+        IF p_tipo_operacao = 'INSERT' THEN
+
+            INSERT INTO auditoria_registros (
+                usuario_bd,
+                tipo_operacao,
+                data_operacao,
+                new_id,
+                new_entrada_id,
+                new_tipo,
+                new_subtipo,
+                new_valor,
+                new_unidade,
+                new_nota,
+                new_horario,
+                new_atualizado_em -- (feedback Sprint 3) trigger: INSERT registra new_atualizado_em
+            )
+            VALUES (
+                USER,
+                'INSERT',
+                CURRENT_TIMESTAMP,
+                p_new_id,
+                p_new_entrada_id,
+                p_new_tipo,
+                p_new_subtipo,
+                p_new_valor,
+                p_new_unidade,
+                p_new_nota,
+                p_new_horario,
+                p_new_atualizado_em
+            );
+
+        ELSIF p_tipo_operacao = 'UPDATE' THEN
+
+            INSERT INTO auditoria_registros (
+                usuario_bd,
+                tipo_operacao,
+                data_operacao,
+                old_id,
+                old_entrada_id,
+                old_tipo,
+                old_subtipo,
+                old_valor,
+                old_unidade,
+                old_nota,
+                old_horario,
+                old_atualizado_em, -- (feedback Sprint 3) trigger: UPDATE registra old_atualizado_em
+                new_id,
+                new_entrada_id,
+                new_tipo,
+                new_subtipo,
+                new_valor,
+                new_unidade,
+                new_nota,
+                new_horario,
+                new_atualizado_em -- (feedback Sprint 3) trigger: UPDATE registra new_atualizado_em
+            )
+            VALUES (
+                USER,
+                'UPDATE',
+                CURRENT_TIMESTAMP,
+                p_old_id,
+                p_old_entrada_id,
+                p_old_tipo,
+                p_old_subtipo,
+                p_old_valor,
+                p_old_unidade,
+                p_old_nota,
+                p_old_horario,
+                p_old_atualizado_em,
+                p_new_id,
+                p_new_entrada_id,
+                p_new_tipo,
+                p_new_subtipo,
+                p_new_valor,
+                p_new_unidade,
+                p_new_nota,
+                p_new_horario,
+                p_new_atualizado_em
+            );
+
+        ELSIF p_tipo_operacao = 'DELETE' THEN
+
+            INSERT INTO auditoria_registros (
+                usuario_bd,
+                tipo_operacao,
+                data_operacao,
+                old_id,
+                old_entrada_id,
+                old_tipo,
+                old_subtipo,
+                old_valor,
+                old_unidade,
+                old_nota,
+                old_horario,
+                old_atualizado_em -- (feedback Sprint 3) trigger: DELETE registra old_atualizado_em
+            )
+            VALUES (
+                USER,
+                'DELETE',
+                CURRENT_TIMESTAMP,
+                p_old_id,
+                p_old_entrada_id,
+                p_old_tipo,
+                p_old_subtipo,
+                p_old_valor,
+                p_old_unidade,
+                p_old_nota,
+                p_old_horario,
+                p_old_atualizado_em
+            );
+
+        END IF;
+
+    EXCEPTION
+
+        WHEN VALUE_ERROR THEN
+            pkg_petcenter_carga.pr_log_erro(
+                'pkg_petcenter_auditoria.pr_auditar_registros',
+                SQLCODE,
+                SQLERRM
+            );
+            RAISE;
+
+        WHEN DUP_VAL_ON_INDEX THEN
+            pkg_petcenter_carga.pr_log_erro(
+                'pkg_petcenter_auditoria.pr_auditar_registros',
+                SQLCODE,
+                SQLERRM
+            );
+            RAISE;
+
+        WHEN OTHERS THEN
+            pkg_petcenter_carga.pr_log_erro(
+                'pkg_petcenter_auditoria.pr_auditar_registros',
+                SQLCODE,
+                SQLERRM
+            );
+            RAISE;
+
+    END pr_auditar_registros;
+
+END pkg_petcenter_auditoria;
+/
+
+
+-- (Sprint 4) trigger: trg_auditoria_registros
+-- Trigger fina: não contém regra de negócio; só chama o package.
+-- (feedback Sprint 3) continua registrando atualizado_em via a procedure empacotada.
 CREATE OR REPLACE TRIGGER trg_auditoria_registros
 AFTER INSERT OR UPDATE OR DELETE ON registros
 FOR EACH ROW
@@ -2391,118 +2741,63 @@ BEGIN
 
     IF INSERTING THEN
 
-        INSERT INTO auditoria_registros (
-            usuario_bd,
-            tipo_operacao,
-            data_operacao,
-            new_id,
-            new_entrada_id,
-            new_tipo,
-            new_subtipo,
-            new_valor,
-            new_unidade,
-            new_nota,
-            new_horario,
-            new_atualizado_em -- (feedback Sprint 3) trigger: INSERT registra new_atualizado_em
-        )
-        VALUES (
-            USER,
-            'INSERT',
-            CURRENT_TIMESTAMP,
-            :NEW.id,
-            :NEW.entrada_id,
-            :NEW.tipo,
-            :NEW.subtipo,
-            :NEW.valor,
-            :NEW.unidade,
-            :NEW.nota,
-            :NEW.horario,
-            :NEW.atualizado_em
+        pkg_petcenter_auditoria.pr_auditar_registros(
+            p_tipo_operacao     => 'INSERT',
+            p_new_id            => :NEW.id,
+            p_new_entrada_id    => :NEW.entrada_id,
+            p_new_tipo          => :NEW.tipo,
+            p_new_subtipo       => :NEW.subtipo,
+            p_new_valor         => :NEW.valor,
+            p_new_unidade       => :NEW.unidade,
+            p_new_nota          => :NEW.nota,
+            p_new_horario       => :NEW.horario,
+            p_new_atualizado_em => :NEW.atualizado_em
         );
 
     ELSIF UPDATING THEN
 
-        INSERT INTO auditoria_registros (
-            usuario_bd,
-            tipo_operacao,
-            data_operacao,
-            old_id,
-            old_entrada_id,
-            old_tipo,
-            old_subtipo,
-            old_valor,
-            old_unidade,
-            old_nota,
-            old_horario,
-            old_atualizado_em, -- (feedback Sprint 3) trigger: UPDATE registra old_atualizado_em
-            new_id,
-            new_entrada_id,
-            new_tipo,
-            new_subtipo,
-            new_valor,
-            new_unidade,
-            new_nota,
-            new_horario,
-            new_atualizado_em -- (feedback Sprint 3) trigger: UPDATE registra new_atualizado_em
-        )
-        VALUES (
-            USER,
-            'UPDATE',
-            CURRENT_TIMESTAMP,
-            :OLD.id,
-            :OLD.entrada_id,
-            :OLD.tipo,
-            :OLD.subtipo,
-            :OLD.valor,
-            :OLD.unidade,
-            :OLD.nota,
-            :OLD.horario,
-            :OLD.atualizado_em,
-            :NEW.id,
-            :NEW.entrada_id,
-            :NEW.tipo,
-            :NEW.subtipo,
-            :NEW.valor,
-            :NEW.unidade,
-            :NEW.nota,
-            :NEW.horario,
-            :NEW.atualizado_em
+        pkg_petcenter_auditoria.pr_auditar_registros(
+            p_tipo_operacao     => 'UPDATE',
+            p_old_id            => :OLD.id,
+            p_old_entrada_id    => :OLD.entrada_id,
+            p_old_tipo          => :OLD.tipo,
+            p_old_subtipo       => :OLD.subtipo,
+            p_old_valor         => :OLD.valor,
+            p_old_unidade       => :OLD.unidade,
+            p_old_nota          => :OLD.nota,
+            p_old_horario       => :OLD.horario,
+            p_old_atualizado_em => :OLD.atualizado_em,
+            p_new_id            => :NEW.id,
+            p_new_entrada_id    => :NEW.entrada_id,
+            p_new_tipo          => :NEW.tipo,
+            p_new_subtipo       => :NEW.subtipo,
+            p_new_valor         => :NEW.valor,
+            p_new_unidade       => :NEW.unidade,
+            p_new_nota          => :NEW.nota,
+            p_new_horario       => :NEW.horario,
+            p_new_atualizado_em => :NEW.atualizado_em
         );
 
     ELSIF DELETING THEN
 
-        INSERT INTO auditoria_registros (
-            usuario_bd,
-            tipo_operacao,
-            data_operacao,
-            old_id,
-            old_entrada_id,
-            old_tipo,
-            old_subtipo,
-            old_valor,
-            old_unidade,
-            old_nota,
-            old_horario,
-            old_atualizado_em -- (feedback Sprint 3) trigger: DELETE registra old_atualizado_em
-        )
-        VALUES (
-            USER,
-            'DELETE',
-            CURRENT_TIMESTAMP,
-            :OLD.id,
-            :OLD.entrada_id,
-            :OLD.tipo,
-            :OLD.subtipo,
-            :OLD.valor,
-            :OLD.unidade,
-            :OLD.nota,
-            :OLD.horario,
-            :OLD.atualizado_em
+        pkg_petcenter_auditoria.pr_auditar_registros(
+            p_tipo_operacao     => 'DELETE',
+            p_old_id            => :OLD.id,
+            p_old_entrada_id    => :OLD.entrada_id,
+            p_old_tipo          => :OLD.tipo,
+            p_old_subtipo       => :OLD.subtipo,
+            p_old_valor         => :OLD.valor,
+            p_old_unidade       => :OLD.unidade,
+            p_old_nota          => :OLD.nota,
+            p_old_horario       => :OLD.horario,
+            p_old_atualizado_em => :OLD.atualizado_em
         );
 
     END IF;
 
 END;
+/
+
 
 
 
@@ -2557,6 +2852,7 @@ BEGIN
     );
 
 END;
+/
 
 
 
@@ -2604,6 +2900,7 @@ BEGIN
     END LOOP;
 
 END;
+/
 
 
 /*
@@ -2656,6 +2953,10 @@ FROM auditoria_registros
 ORDER BY id_auditoria;
 
 
+-- ============================================================
+-- 7. EVIDÊNCIAS DE EXCEÇÃO
+-- ============================================================
+
 -- (feedback Sprint 3) evidência: tratamentos de exceção de cada procedure
 -- Cada teste força um erro proposital, registra em logs_erros e imprime o último log.
 
@@ -2705,36 +3006,36 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('===== EVIDENCIAS DE EXCECAO =====');
 
     -- (feedback Sprint 3) evidência: pr_insert_users / DUP_VAL_ON_INDEX
-    pr_insert_users(
+    pkg_petcenter_carga.pr_insert_users(
         'Ana Souza',
         'ana@email.com',
         '123',
         '11999990001',
         'TUTOR'
     );
-    mostrar_ultimo_log('1) pr_insert_users -> DUP_VAL_ON_INDEX (email duplicado)');
+    mostrar_ultimo_log('1) pkg_petcenter_carga.pr_insert_users -> DUP_VAL_ON_INDEX (email duplicado)');
 
     -- (feedback Sprint 3) evidência: pr_insert_users / OTHERS
-    pr_insert_users(
+    pkg_petcenter_carga.pr_insert_users(
         'Usuario Invalido',
         'invalido@email.com',
         '123',
         '11999990099',
         'ADMIN'
     );
-    mostrar_ultimo_log('2) pr_insert_users -> OTHERS (tipo_usuario inválido)');
+    mostrar_ultimo_log('2) pkg_petcenter_carga.pr_insert_users -> OTHERS (tipo_usuario inválido)');
 
     -- (feedback Sprint 3) evidência: pr_insert_veterinarios / OTHERS
-    pr_insert_veterinarios(
+    pkg_petcenter_carga.pr_insert_veterinarios(
         99999,
         'CRMV-XX-0000',
         'Teste',
         'FK inexistente'
     );
-    mostrar_ultimo_log('3) pr_insert_veterinarios -> OTHERS (user_id inexistente)');
+    mostrar_ultimo_log('3) pkg_petcenter_carga.pr_insert_veterinarios -> OTHERS (user_id inexistente)');
 
     -- (feedback Sprint 3) evidência: pr_insert_pets / OTHERS
-    pr_insert_pets(
+    pkg_petcenter_carga.pr_insert_pets(
         99999,
         'Pet Fantasma',
         'Cachorro',
@@ -2742,40 +3043,40 @@ BEGIN
         TO_DATE('2020-01-01','YYYY-MM-DD'),
         'FK inexistente'
     );
-    mostrar_ultimo_log('4) pr_insert_pets -> OTHERS (user_id inexistente)');
+    mostrar_ultimo_log('4) pkg_petcenter_carga.pr_insert_pets -> OTHERS (user_id inexistente)');
 
     -- (feedback Sprint 3) evidência: pr_insert_pet_veterinario / OTHERS
-    pr_insert_pet_veterinario(
+    pkg_petcenter_carga.pr_insert_pet_veterinario(
         99999,
         1,
         SYSDATE,
         1,
         'FK inexistente'
     );
-    mostrar_ultimo_log('5) pr_insert_pet_veterinario -> OTHERS (pet_id inexistente)');
+    mostrar_ultimo_log('5) pkg_petcenter_carga.pr_insert_pet_veterinario -> OTHERS (pet_id inexistente)');
 
     -- (feedback Sprint 3) evidência: pr_insert_diario_entradas / DUP_VAL_ON_INDEX
-    pr_insert_diario_entradas(
+    pkg_petcenter_carga.pr_insert_diario_entradas(
         1,
         TO_DATE('2026-05-10','YYYY-MM-DD'),
         'Duplicata proposital',
         'Teste',
         'COMPLETO'
     );
-    mostrar_ultimo_log('6) pr_insert_diario_entradas -> DUP_VAL_ON_INDEX (pet+data duplicados)');
+    mostrar_ultimo_log('6) pkg_petcenter_carga.pr_insert_diario_entradas -> DUP_VAL_ON_INDEX (pet+data duplicados)');
 
     -- (feedback Sprint 3) evidência: pr_insert_diario_entradas / OTHERS
-    pr_insert_diario_entradas(
+    pkg_petcenter_carga.pr_insert_diario_entradas(
         1,
         TO_DATE('2026-05-12','YYYY-MM-DD'),
         'Status inválido',
         'Teste',
         'CANCELADO'
     );
-    mostrar_ultimo_log('7) pr_insert_diario_entradas -> OTHERS (status inválido)');
+    mostrar_ultimo_log('7) pkg_petcenter_carga.pr_insert_diario_entradas -> OTHERS (status inválido)');
 
     -- (feedback Sprint 3) evidência: pr_insert_registros / OTHERS
-    pr_insert_registros(
+    pkg_petcenter_carga.pr_insert_registros(
         99999,
         'TESTE',
         'TESTE',
@@ -2784,18 +3085,18 @@ BEGIN
         'FK inexistente',
         CURRENT_TIMESTAMP
     );
-    mostrar_ultimo_log('8) pr_insert_registros -> OTHERS (entrada_id inexistente)');
+    mostrar_ultimo_log('8) pkg_petcenter_carga.pr_insert_registros -> OTHERS (entrada_id inexistente)');
 
     -- (feedback Sprint 3) evidência: pr_insert_comentarios / OTHERS
-    pr_insert_comentarios(
+    pkg_petcenter_carga.pr_insert_comentarios(
         99999,
         1,
         'FK inexistente'
     );
-    mostrar_ultimo_log('9) pr_insert_comentarios -> OTHERS (entrada_id inexistente)');
+    mostrar_ultimo_log('9) pkg_petcenter_carga.pr_insert_comentarios -> OTHERS (entrada_id inexistente)');
 
     -- (feedback Sprint 3) evidência: pr_insert_insights / OTHERS
-    pr_insert_insights(
+    pkg_petcenter_carga.pr_insert_insights(
         1,
         'TESTE',
         'Nível inválido',
@@ -2807,10 +3108,10 @@ BEGIN
         'ATIVO',
         '{"teste":true}'
     );
-    mostrar_ultimo_log('10) pr_insert_insights -> OTHERS (nivel_alerta inválido)');
+    mostrar_ultimo_log('10) pkg_petcenter_carga.pr_insert_insights -> OTHERS (nivel_alerta inválido)');
 
     -- (feedback Sprint 3) evidência: pr_insert_solicitacoes / OTHERS
-    pr_insert_solicitacoes(
+    pkg_petcenter_carga.pr_insert_solicitacoes(
         1,
         1,
         1,
@@ -2818,10 +3119,10 @@ BEGIN
         'Status inválido',
         NULL
     );
-    mostrar_ultimo_log('11) pr_insert_solicitacoes -> OTHERS (status inválido)');
+    mostrar_ultimo_log('11) pkg_petcenter_carga.pr_insert_solicitacoes -> OTHERS (status inválido)');
 
     -- (feedback Sprint 3) evidência: pr_insert_alertas / OTHERS
-    pr_insert_alertas(
+    pkg_petcenter_carga.pr_insert_alertas(
         1,
         1,
         'VACINA',
@@ -2832,15 +3133,20 @@ BEGIN
         NULL,
         1
     );
-    mostrar_ultimo_log('12) pr_insert_alertas -> OTHERS (tipo inválido)');
+    mostrar_ultimo_log('12) pkg_petcenter_carga.pr_insert_alertas -> OTHERS (tipo inválido)');
 
-    DBMS_OUTPUT.PUT_LINE('13) pr_relatorio_pets_json / pr_relatorio_registros_agrupado');
+    DBMS_OUTPUT.PUT_LINE('13) pkg_petcenter_relatorios.pr_relatorio_pets_json / pr_relatorio_registros_agrupado');
     DBMS_OUTPUT.PUT_LINE('    NO_DATA_FOUND só ocorre com tabela vazia.');
     DBMS_OUTPUT.PUT_LINE('    Não apagamos os dados da entrega para preservar a carga >= 5.');
     DBMS_OUTPUT.PUT_LINE('===== FIM DAS EVIDENCIAS DE EXCECAO =====');
 
 END;
+/
 
+
+-- ============================================================
+-- 8. CONSULTAS FINAIS
+-- ============================================================
 
 -- (feedback Sprint 3) consulta: grid de logs_erros para documentação técnica
 SELECT
@@ -2852,6 +3158,17 @@ SELECT
     mensagem_erro
 FROM logs_erros
 ORDER BY id;
+
+
+-- (Sprint 4) conferência: packages e trigger empacotada
+SELECT
+    object_name,
+    object_type,
+    status
+FROM user_objects
+WHERE object_name LIKE 'PKG_PETCENTER%'
+   OR object_name = 'TRG_AUDITORIA_REGISTROS'
+ORDER BY object_type, object_name;
 
 
 
